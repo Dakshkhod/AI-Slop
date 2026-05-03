@@ -1,0 +1,27 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+.env.local
+
+# --- Node / Next ---
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# --- IDE / OS ---
+.DS_Store
+.vscode/
+.idea/
+
+# --- TruthLens runtime ---
+_data/
+_cache/
+backend/_data/
+backend/_cache/
+*.log

@@ -1,0 +1,117 @@
+#truthlens-overlay {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  width: 360px;
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  z-index: 2147483647;
+  font-family: -apple-system, "Inter", "Segoe UI", system-ui, sans-serif;
+  color: #e8eaf3;
+  background: rgba(13, 16, 39, 0.96);
+  border: 1px solid rgba(126, 224, 255, 0.25);
+  border-radius: 18px;
+  box-shadow:
+    0 30px 80px -20px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(126, 224, 255, 0.15);
+  backdrop-filter: blur(12px);
+  padding: 16px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+#truthlens-overlay .tl-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+#truthlens-overlay .tl-title {
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+}
+
+#truthlens-overlay .tl-close {
+  border: 0;
+  background: transparent;
+  color: #9aa1c2;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+
+#truthlens-overlay .tl-score {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 10px;
+}
+
+#truthlens-overlay .tl-num {
+  font-size: 30px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  width: 64px;
+  text-align: right;
+}
+
+#truthlens-overlay .tl-verdict {
+  font-weight: 600;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+#truthlens-overlay .tl-verdict.real { color: #5fd28a; }
+#truthlens-overlay .tl-verdict.ai { color: #ff5577; }
+#truthlens-overlay .tl-verdict.inc { color: #ffb547; }
+
+#truthlens-overlay h4 {
+  margin: 12px 0 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: #9aa1c2;
+}
+
+#truthlens-overlay ol,
+#truthlens-overlay ul {
+  margin: 0;
+  padding-left: 16px;
+}
+
+#truthlens-overlay li {
+  margin-bottom: 4px;
+}
+
+#truthlens-overlay .tl-row {
+  display: flex;
+  justify-content: space-between;
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 11px;
+  color: #c8cce0;
+}
+
+#truthlens-overlay .tl-busy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #c8cce0;
+}
+
+#truthlens-overlay .tl-spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  border: 2px solid rgba(126, 224, 255, 0.25);
+  border-top-color: #7ee0ff;
+  animation: tl-spin 0.8s linear infinite;
+}
+
+@keyframes tl-spin { to { transform: rotate(360deg); } }

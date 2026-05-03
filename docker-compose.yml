@@ -1,0 +1,30 @@
+services:
+  backend:
+    build: ./backend
+    container_name: truthlens-backend
+    ports:
+      - "8000:8000"
+    environment:
+      TRUTHLENS_LOG_LEVEL: INFO
+      TRUTHLENS_ENABLE_ML: "true"
+      # Optional reverse-search keys:
+      # TRUTHLENS_GOOGLE_CSE_KEY: ""
+      # TRUTHLENS_GOOGLE_CSE_CX: ""
+    volumes:
+      - truthlens_cache:/root/.cache
+      - ./_data:/app/_data
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: truthlens-frontend
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://backend:8000
+    restart: unless-stopped
+
+volumes:
+  truthlens_cache:

@@ -1,0 +1,48 @@
+# --- Web framework ---
+fastapi>=0.115
+uvicorn[standard]>=0.32
+python-multipart>=0.0.17
+pydantic>=2.10
+pydantic-settings>=2.6
+
+# --- HTTP / networking ---
+httpx>=0.28
+requests>=2.32
+
+# --- Image / Media I/O ---
+Pillow>=11.0
+opencv-python-headless>=4.10
+imageio>=2.36
+imageio-ffmpeg>=0.5
+ffmpeg-python>=0.2
+
+# --- Numerics / DSP ---
+numpy>=2.1
+scipy>=1.14
+PyWavelets>=1.7
+scikit-image>=0.24
+scikit-learn>=1.5
+
+# --- Metadata / EXIF / hashing ---
+exifread>=3.0
+piexif>=1.1
+ImageHash>=4.3
+
+# --- Audio ---
+librosa>=0.10
+soundfile>=0.12
+
+# --- Optional ML (loaded lazily; pipeline degrades gracefully if missing) ---
+# Torch + Transformers are imported lazily and the service runs without
+# them — keep them optional in environments without GPU/heavy deps.
+torch>=2.5; python_version < "3.14"
+torchvision>=0.20; python_version < "3.14"
+transformers>=4.46
+huggingface-hub>=0.26
+xgboost>=2.1
+
+# --- Misc ---
+python-dotenv>=1.0
+loguru>=0.7
+orjson>=3.10
+typing-extensions>=4.12

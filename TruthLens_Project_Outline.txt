@@ -1,0 +1,439 @@
+# AI Slop Detection Platform
+
+## Complete Project Outline
+
+------------------------------------------------------------------------
+
+## 1. The Problem
+
+AI-generated content (images, video, audio) has grown exponentially on
+social media, enabling fraud, misinformation, and identity deception.
+People cannot distinguish real content from AI slop with the naked eye.
+Existing tools are fragmented, inaccurate, or inaccessible to regular
+users. No unified, multi-modal, explainable platform exists today that a
+journalist, a concerned parent, or a fraud investigator can actually
+use.
+
+Key issues: - AI image quality (Imagen 3, Midjourney v6, Firefly 3) has
+reached near-zero visual artifacts - Pixel-level forensics are becoming
+obsolete as generation improves - No single platform covers images +
+video + audio together - Existing tools give binary yes/no without
+explaining why - Screenshots and re-uploads strip all traditional
+forensic signals
+
+------------------------------------------------------------------------
+
+## 2. What We Are Building
+
+### Core Product
+
+A web platform where anyone uploads a photo, video, or audio clip and
+receives: - A 0--100 authenticity score with confidence band - A visual
+heatmap (GradCAM overlay) highlighting suspicious regions - A
+plain-language checklist explaining every flag raised - Per-domain
+confidence breakdown (quantum, thermodynamic, biological signals) - A
+forensic trail explaining exactly how a deception was constructed
+(e.g. screenshot detection)
+
+### Key Differentiators
+
+-   Multi-modal: images, video, audio in one place
+-   Explainable: shows *why*, not just *what*
+-   Physics-based signals: not just ML guessing --- grounded in physical
+    laws
+-   Free for individuals, B2B API for businesses and news organizations
+-   Browser extension for inline detection on any webpage (the killer
+    feature)
+
+### Target Users
+
+-   Regular people who received a suspicious WhatsApp photo
+-   Journalists fact-checking before publishing
+-   HR departments verifying headshots and portfolio images
+-   Legal teams dealing with deepfake evidence
+-   Social media platforms (API integration)
+
+------------------------------------------------------------------------
+
+## 3. What Already Exists (Competition Landscape)
+
+  -------------------------------------------------------------------------
+  Tool                      What it does            Gap
+  ------------------------- ----------------------- -----------------------
+  Hive Moderation, AI or    AI image detection      Single modality, no
+  Not                                               explainability
+
+  ElevenLabs AI Speech      AI audio detection      Audio only
+  Classifier                                        
+
+  Deepware, Reality         Deepfake video          Video only, expensive
+  Defender                                          
+
+  C2PA                      Camera watermarking     Hardware adoption still
+  (Adobe/Microsoft/Nikon)   standard                early
+
+  SynthID (Google)          Invisible watermark in  Only works on Google's
+                            AI images               models
+  -------------------------------------------------------------------------
+
+**The gap:** No one has built a unified, consumer-friendly, multi-modal
+platform with explainability. That is the opportunity.
+
+------------------------------------------------------------------------
+
+## 4. Detection Pipeline --- 6 Layers
+
+Every uploaded file passes through these layers sequentially. Early
+layers are fast and cheap; later layers are deeper and more expensive.
+
+### Layer 1 --- Deep Reverse Search
+
+Cross-reference Google Images, TinEye, PimEyes (face-based), Wayback
+Machine snapshots, and stock photo databases. If the image is found and
+predates the claim, it is authentic. If it does not exist anywhere, that
+is a weak AI signal. This is the fastest and cheapest check --- runs
+first.
+
+### Layer 2 --- Metadata & Provenance Forensics
+
+-   Inspect EXIF data: camera model, GPS coordinates, timestamp, ISO,
+    shutter speed, aperture
+-   Verify C2PA cryptographic signatures (hardware-signed by camera at
+    capture)
+-   Check for screenshot resolution fingerprints (exact match to known
+    device screen sizes)
+-   Detect EXIF stripping patterns
+-   Analyze compression history
+
+Complete absence of all sensor metadata simultaneously is a strong flag.
+Real photos occasionally have EXIF stripped by WhatsApp or Twitter. They
+almost never have every single sensor signal absent at once ---
+screenshots always do.
+
+### Layer 3 --- Physics-Based Signal Extraction (Core Innovation)
+
+Five signals derived from physical laws. This layer is resistant to new
+AI model releases because it measures physics, not learned patterns.
+
+**Signal 1: FFT Power Spectrum** Real natural images follow a 1/f power
+law --- lower spatial frequencies have more energy than higher ones,
+slope approximately −2.0 to −3.2 on a log-log plot. AI images deviate
+from this slope in predictable ways. GANs specifically show
+characteristic spectral peaks at their training resolution.
+Implementation: 2D FFT of luminance channel → radially-averaged power
+spectrum → polyfit on log-log scale → compare slope.
+
+**Signal 2: Benford's Law on DCT Coefficients** Leading digits of DCT
+(Discrete Cosine Transform) block coefficients of real images follow
+Benford's logarithmic distribution (1 appears \~30% of the time, 2
+appears \~17%, etc.). AI images violate this because their pixel
+distributions come from learned Gaussian-like distributions rather than
+multiplicative physical processes. Implementation: block DCT → extract
+non-DC coefficients → chi-squared test against Benford's expected
+distribution.
+
+**Signal 3: Wavelet Kurtosis** Real images have high kurtosis in wavelet
+coefficient subbands --- most coefficients near zero, occasional large
+values. AI images have kurtosis systematically outside the natural range
+at specific wavelet scales, revealing smoothness from neural network
+upsampling. Implementation: PyWavelets db4 decomposition, 4 levels →
+kurtosis of each subband → compare to natural range (3--20).
+
+**Signal 4: Quantum & Sensor Noise (PRNU)** Every real camera sensor is
+physically imperfect in a unique measurable way --- Photo Response
+Non-Uniformity (PRNU) --- a noise fingerprint unique to each sensor,
+like a ballistic fingerprint. AI images have no PRNU because they were
+never captured by a sensor. They have statistically perfect noise ---
+which is itself the tell. Implementation: denoise image using wavelet
+denoising → extract noise residual → analyze PRNU structure.
+
+**Signal 5: Double JPEG & Screenshot Detection** Screenshots and
+re-saves create double-compression artifacts: periodic peaks in the
+frequency domain (detectable via Fourier transform), 8×8 DCT block
+boundary misalignment, and exact-screen-resolution dimensions.
+Resolution fingerprinting: iPhone 15 Pro → 1179×2556, Samsung S24 Ultra
+→ 1440×3088. Any match to a known device screen resolution triggers an
+automatic flag.
+
+### Layer 4 --- ML Model Inference
+
+-   Fine-tuned EfficientNet-B4 (images) --- trained on CIFAKE dataset,
+    \~90% accuracy
+-   TimeSformer (video) --- trained on FaceForensics++ and DFDC dataset
+-   Wav2Vec2 (audio) --- fine-tuned on ASVspoof2019 dataset, \~95%
+    accuracy
+-   GradCAM heatmap generation --- highlights which spatial regions
+    drove the verdict
+-   Computational photography pipeline fingerprinting --- distinguishes
+    Deep Fusion/Night Sight from Midjourney/Stable Diffusion signatures
+
+### Layer 5 --- Biological & Semantic Consistency Checks
+
+**For video and portraits:** - rPPG (remote photoplethysmography):
+heartbeat causes periodic skin color changes (0.7--3Hz band) in real
+video. AI-generated video has no cardiovascular simulation. Extracted
+via green channel averaging across facial region + bandpass filter. -
+Microsaccades: real eyes make involuntary movements 1--3 times/second
+(0.1--0.3 degree amplitude). AI video eyes are unnaturally still or show
+smooth pursuit (wrong --- smooth pursuit only occurs when tracking
+moving objects). Detected via optical flow on iris landmarks using
+MediaPipe. - Corneal reflection geometry: light reflected in both eyes
+must be geometrically consistent with the scene's actual light sources.
+Both eyes must show the same reflection.
+
+**For all media:** - Shadow direction vs sun position and time of day -
+Reflection accuracy in mirrors, water, glasses, eyes - Light source
+math: multiple shadows at different angles require multiple light
+sources - Depth-of-field physics: bokeh blur must follow lens aperture
+laws - Perspective geometry: parallel lines must converge at the correct
+vanishing point - Vocal tract formant physics: F1--F4 formants must be
+consistent with a physically realizable vocal tract length (14--20cm for
+adults)
+
+### Layer 6 --- Ensemble Voting & Fusion
+
+-   3--5 independent models vote on the verdict
+-   XGBoost classifier takes the full feature vector from all layers →
+    outputs a final probability
+-   If models disagree significantly, verdict is flagged "Inconclusive"
+    --- honesty over false certainty
+-   Ensemble fusion is a lightweight model (200KB) running on CPU in
+    under 5ms
+
+------------------------------------------------------------------------
+
+## 5. Output Format (What the User Sees)
+
+-   **Authenticity score**: 0--100 with confidence band (e.g. "73 ± 8,
+    likely real"). Not a binary yes/no.
+-   **Verdict label**: "Likely real" / "Inconclusive" / "Likely
+    AI-generated" with confidence level
+-   **Visual heatmap**: GradCAM red-to-blue overlay showing which
+    regions triggered suspicion. Not just "something is wrong" but
+    "these teeth are physically wrong, this shadow doesn't match the
+    light source."
+-   **Signal checklist**: plain-language list --- "No EXIF data found.
+    Skin noise pattern matches Midjourney v6 signature. Ear geometry
+    inconsistent with human anatomy."
+-   **Per-domain confidence**: "Quantum signals: 87% consistent with
+    real sensor. Thermodynamic: 34% real. Biological: 12% real."
+-   **Forensic trail** (for screenshots): "Image dimensions match iPhone
+    15 Pro screen exactly (1179×2556). Double JPEG compression detected.
+    Zero EXIF sensor data present. Rendering antialiasing consistent
+    with iOS Safari. Crop boundary misalignment detected."
+-   **Processing time** shown to user for transparency
+
+------------------------------------------------------------------------
+
+## 6. Mobile Photo Problem --- Special Handling
+
+Modern phones (Pixel 9, iPhone 16) apply 40--60 AI processing algorithms
+(HDR fusion, AI denoising, Deep Fusion, Night Sight) to every photo
+before saving. This destroys pixel-level forensics. Our approach for
+mobile shifts from "find what's wrong" to "find what's missing from its
+physical history."
+
+### What We Verify for Mobile
+
+-   **Gyroscope + accelerometer**: micro-tremor of the human hand at
+    capture should mathematically match the blur vector in the image
+-   **GPS + cell tower constellation**: specific set of towers visible
+    from that location + signal strengths + nearby WiFi networks ---
+    nearly unique to a specific place and time
+-   **Barometric pressure**: altitude should be consistent with claimed
+    location's elevation
+-   **Magnetometer**: phone orientation relative to magnetic north ---
+    shadows and lighting should be consistent with actual sun position
+-   **Ambient light sensor**: measured scene brightness should be
+    consistent with EXIF ISO/shutter speed combination
+-   **Burst photo siblings**: real photos have temporal neighbors
+    (milliseconds apart) with physically consistent micro-differences
+
+### Screenshot Detection Signals
+
+-   Exact screen resolution match against known device database
+-   Double JPEG compression (FFT periodic peaks)
+-   OLED/LCD subpixel bleeding artifacts
+-   Rendering engine fingerprint (Chrome, iOS Safari, Android Chrome
+    leave different antialiasing patterns)
+-   Complete absence of all sensor coherence simultaneously
+-   Crop boundary DCT block misalignment
+-   Aspect ratio GCD analysis to infer original canvas size
+
+### What Still Defeats Us (Honest Limit)
+
+A high-quality AI image printed on paper and photographed with a real
+camera acquires real PRNU, real sensor data, real EXIF, and real burst
+siblings. Detection then relies only on semantic and physics consistency
+checks. This is the "analog hole" --- only C2PA hardware signing closes
+it, because the paper printout cannot carry the original camera's
+cryptographic signature.
+
+------------------------------------------------------------------------
+
+## 7. The Camera Watermarking Angle (C2PA)
+
+This is the long-term solution to the entire problem. The C2PA
+(Coalition for Content Provenance and Authenticity) standard embeds a
+cryptographic certificate at the hardware level when a photo is taken.
+Nikon Z9, Leica M11-P, Sony A9 III, and newer iPhones are already
+implementing this.
+
+The certificate chain says: "This pixel array was captured by sensor #X
+at coordinates Y at timestamp Z, signed by the manufacturer's private
+key." An AI model cannot forge this --- it doesn't have the camera
+manufacturer's private key.
+
+**Our platform's role:** - Build C2PA verification into the platform now
+--- when adoption grows, we are already ready - As signed cameras become
+the norm, *absence* of a C2PA signature becomes a red flag by itself -
+Offer photographers a voluntary "sign your photo" tool using C2PA so
+their real work is verifiable - Advocate for Apple and Google to make
+Secure Enclave signing the default for every phone photo
+
+------------------------------------------------------------------------
+
+## 8. Technical Architecture
+
+### Backend Services
+
+-   Language: Python
+-   Framework: FastAPI
+-   ML: PyTorch, HuggingFace Transformers, timm
+-   Signal processing: NumPy, SciPy, PyWavelets
+-   Media: ffmpeg-python, Pillow, OpenCV
+-   Provenance: c2pa-python (wraps Rust c2pa-rs library)
+-   Audio: parselmouth (Praat wrapper), pyVHR (rPPG), scipy.signal
+-   Face/eye tracking: MediaPipe
+-   Explainability: grad-cam library (GradCAM heatmaps)
+-   EXIF: exifread
+-   Ensemble: XGBoost
+
+### Message Queue & Storage
+
+-   Queue: Redis (Upstash on free tier)
+-   Primary database: PostgreSQL (Supabase on free tier)
+-   Blob storage: Cloudflare R2 (10GB free, zero egress fees)
+-   Vector search: pgvector (perceptual hash index for duplicate
+    detection)
+
+### Frontend
+
+-   Framework: Next.js (React)
+-   Styling: Tailwind CSS
+-   Deployment: Vercel (free tier)
+
+### Infrastructure
+
+-   MVP: Render.com free tier (backend), Vercel (frontend), Modal.com
+    (GPU --- \$30/month free credit)
+-   Production: AWS EKS (Kubernetes) with auto-scaling GPU node groups
+    (g4dn.xlarge)
+-   CI/CD: GitHub Actions → Docker → ECR
+-   Monitoring: Grafana + Prometheus
+
+### ML Models Used
+
+  Modality   Model                          Dataset                  Accuracy
+  ---------- ------------------------------ ------------------------ ------------------------
+  Images     EfficientNet-B4 (fine-tuned)   CIFAKE                   \~90%
+  Video      TimeSformer                    FaceForensics++ + DFDC   \~85%
+  Audio      Wav2Vec2 (fine-tuned)          ASVspoof2019             \~95%
+  Ensemble   XGBoost                        All signal features      Final fusion
+  Heatmap    GradCAM on EfficientNet        ---                      Visual explainability
+  Face/Eye   MediaPipe Iris                 ---                      Microsaccade detection
+  rPPG       pyVHR (CHROM + POS)            ---                      Heartbeat signal
+
+------------------------------------------------------------------------
+
+## 9. Free Stack (MVP --- \$0/month)
+
+  -----------------------------------------------------------------------
+  Component               Service                 Free Tier
+  ----------------------- ----------------------- -----------------------
+  Frontend                Vercel                  Unlimited personal
+                                                  projects
+
+  Backend API             Render.com              Free web service
+
+  Database                Supabase                500MB PostgreSQL
+
+  Blob storage            Cloudflare R2           10GB + 1M reads/month
+
+  GPU inference           Modal.com               \$30 credit/month
+                                                  (\~25,000 image
+                                                  analyses)
+
+  Queue                   Upstash Redis           10,000 commands/day
+
+  Reverse search          Google Custom Search    100 queries/day
+                          API                     
+  -----------------------------------------------------------------------
+
+**Total cost at MVP scale (hundreds of requests/day): \$0**
+
+------------------------------------------------------------------------
+
+
+------------------------------------------------------------------------
+
+## 11. What We Can Detect vs What Defeats Us
+
+  -----------------------------------------------------------------------
+  Method                  Survives perfect visual Spoofable?
+                          quality?                
+  ----------------------- ----------------------- -----------------------
+  C2PA hardware signing   Yes                     Only by compromising
+                                                  manufacturer key
+
+  PRNU sensor fingerprint Yes                     Requires knowing target
+                                                  camera's fingerprint
+
+  SynthID / model         Yes                     Only if attacker
+  watermarks                                      controls the model
+
+  Physics consistency     Partially               AI improving fast ---
+  checks                                          2--3 year runway
+
+  Biological              Yes (for now)           Arms race --- years
+  micro-signals (rPPG,                            ahead
+  microsaccades)                                  
+
+  Screenshot detection    Yes                     Analog hole: print +
+                                                  photograph defeats it
+
+  Print-and-photograph    No                      The fundamental
+  attack                                          unsolvable problem
+                                                  without C2PA
+  -----------------------------------------------------------------------
+
+**Key insight:** No single method gives 100%. Stacking all of them makes
+simultaneous spoofing computationally and logistically prohibitive for
+average bad actors. Nation-state level attackers are a different
+problem.
+
+**The fundamental reframe:** We are not a pixel scanner. We are a
+provenance verifier. The question stops being "does this image look
+AI-generated?" and becomes "can this image prove it has a past?" That
+framing is much harder to defeat regardless of how good generation gets.
+
+------------------------------------------------------------------------
+
+------------------------------------------------------------------------
+
+## 14. Unique Value Proposition
+
+The market has individual detectors. No one has built: 1. **Multi-modal
+in one place** --- images + video + audio 2. **Physics-based signals**
+--- not just ML classifiers that go stale with each new AI model release
+3. **Explainability** --- specific, visual, per-signal reasoning rather
+than a black-box score 4. **Provenance framing** --- verifying the
+physical history of content, not just analyzing its pixels 5.
+**Consumer-accessible** --- free for individuals, not just enterprise
+API customers 6. **Browser extension** --- passive inline detection as
+you browse, not just a manual upload tool
+
+------------------------------------------------------------------------
+
+
+

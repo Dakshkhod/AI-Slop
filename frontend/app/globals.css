@@ -1,0 +1,48 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+  background-color: #070918;
+  color: #e8eaf3;
+}
+
+body {
+  background-image:
+    radial-gradient(800px 500px at 10% -10%, rgba(62, 197, 255, 0.18), transparent 60%),
+    radial-gradient(600px 400px at 110% 10%, rgba(255, 85, 119, 0.14), transparent 60%),
+    radial-gradient(900px 600px at 50% 110%, rgba(126, 224, 255, 0.12), transparent 60%);
+  background-attachment: fixed;
+}
+
+/* Subtle scanline texture for the brand */
+.bg-grid {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* Smooth scroll for anchor jumps */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Custom range thumb */
+input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: #7ee0ff;
+  cursor: pointer;
+  border: 2px solid #070918;
+}
