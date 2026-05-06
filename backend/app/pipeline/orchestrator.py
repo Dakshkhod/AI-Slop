@@ -56,6 +56,7 @@ def analyze(raw: bytes, filename: str, modality: Modality) -> AnalyzeResponse:
         p_ai=fused["p_ai"],
         domain_real_confidence=fused["domain_breakdown"],
         forensic_trail=fused["forensic_trail"],
+        provenance_trail=fused["provenance_trail"],
         checklist=fused["checklist"],
         signals=signals,
         heatmaps=heatmaps,

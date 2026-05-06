@@ -78,6 +78,86 @@ def _detect_c2pa(raw: bytes) -> Tuple[bool, Optional[str]]:
     return False, None
 
 
+def _mime_from_bytes(raw: bytes) -> str:
+    """Detect image MIME type from magic bytes for c2pa-python."""
+    if raw[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if raw[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "image/webp"
+    if raw[:4] in (b"MM\x00*", b"II*\x00"):
+        return "image/tiff"
+    return "image/jpeg"
+
+
+def _verify_c2pa(raw: bytes) -> Dict[str, Any]:
+    """Attempt full cryptographic C2PA verification.
+
+    Returns a dict with keys:
+      present: bool — C2PA data detected at all
+      verified: bool — signature chain validated
+      issuer: str | None
+      claim_generator: str | None
+      assertions: list[str]
+      manifest_store: dict (raw manifest JSON, truncated)
+      marker: str | None — if marker-only detection was used
+      error: str | None
+    """
+    result: Dict[str, Any] = {
+        "present": False,
+        "verified": False,
+        "issuer": None,
+        "claim_generator": None,
+        "assertions": [],
+        "manifest_store": {},
+        "marker": None,
+        "error": None,
+    }
+    try:
+        import json as _json
+        import c2pa  # type: ignore[import]
+
+        mime = _mime_from_bytes(raw)
+        reader = c2pa.Reader.from_bytes(mime, raw)
+        manifest_json = reader.json()
+        store = _json.loads(manifest_json) if isinstance(manifest_json, str) else manifest_json
+
+        active_label = store.get("active_manifest", "")
+        manifests = store.get("manifests", {})
+        active = manifests.get(active_label, {})
+
+        issuer = active.get("signature_info", {}).get("issuer")
+        claim_gen = active.get("claim_generator", "")
+        assertions = [a.get("label", "") for a in active.get("assertions", []) if a.get("label")]
+
+        result.update({
+            "present": True,
+            "verified": True,
+            "issuer": issuer,
+            "claim_generator": claim_gen,
+            "assertions": assertions,
+            "manifest_store": {k: v for k, v in store.items() if k != "manifests"},
+        })
+        return result
+
+    except ImportError:
+        # c2pa-python not installed — fall back to marker detection
+        has, msg = _detect_c2pa(raw)
+        result["present"] = has
+        result["marker"] = msg
+        result["error"] = "c2pa-python not installed; marker-only detection used"
+        return result
+
+    except Exception as exc:
+        # c2pa-python present but verification failed (invalid/missing manifest)
+        has, msg = _detect_c2pa(raw)
+        result["present"] = has
+        result["marker"] = msg
+        result["error"] = str(exc)
+        return result
+
+
 def _ai_software_signature(software: str) -> Optional[str]:
     s = software.lower()
     needles = [
@@ -191,8 +271,46 @@ def metadata_signal(
         )
     )
 
-    # --- Signal B: C2PA presence ---
-    has_c2pa, c2pa_msg = _detect_c2pa(raw)
+    # --- Signal B: C2PA full verification ---
+    c2pa_info = _verify_c2pa(raw)
+    has_c2pa = c2pa_info["present"]
+    verified = c2pa_info["verified"]
+    issuer = c2pa_info.get("issuer")
+    claim_gen = c2pa_info.get("claim_generator", "")
+
+    if verified:
+        if issuer:
+            c2pa_p_ai = 0.05
+            c2pa_conf = 0.90
+            c2pa_sev = SignalSeverity.pass_
+            c2pa_plain = (
+                f"C2PA manifest cryptographically verified. "
+                f"Issuer: {issuer}. "
+                f"Generator: {claim_gen or 'camera/device'}. "
+                "This is the strongest possible real-image signal."
+            )
+        else:
+            c2pa_p_ai = 0.10
+            c2pa_conf = 0.80
+            c2pa_sev = SignalSeverity.pass_
+            c2pa_plain = (
+                f"C2PA manifest verified (no issuer in cert). "
+                f"Generator: {claim_gen or 'unknown'}."
+            )
+    elif has_c2pa:
+        c2pa_p_ai = 0.15
+        c2pa_conf = 0.40
+        c2pa_sev = SignalSeverity.pass_
+        c2pa_plain = (
+            f"C2PA marker detected ({c2pa_info.get('marker', '')}). "
+            "Full signature verification unavailable — install c2pa-python."
+        )
+    else:
+        c2pa_p_ai = 0.50
+        c2pa_conf = 0.05
+        c2pa_sev = SignalSeverity.info
+        c2pa_plain = "No C2PA / Content Credentials manifest present."
+
     out.append(
         SignalResult(
             id="c2pa_presence",
@@ -200,20 +318,15 @@ def metadata_signal(
             name="C2PA / Content Credentials manifest",
             description=(
                 "C2PA cryptographically signs pixels at the sensor or "
-                "generator. A valid manifest is the strongest provenance "
+                "generator. A verified manifest is the strongest provenance "
                 "signal currently available."
             ),
             domain="provenance",
-            p_ai=0.1 if has_c2pa else 0.5,
-            confidence=0.4 if has_c2pa else 0.05,
-            severity=SignalSeverity.pass_ if has_c2pa else SignalSeverity.info,
-            evidence={"present": has_c2pa, "marker": c2pa_msg},
-            plain_language=(
-                f"C2PA manifest detected ({c2pa_msg}). Verifying signature "
-                "would require the c2pa-rs verifier."
-                if has_c2pa
-                else "No C2PA / Content Credentials manifest present."
-            ),
+            p_ai=c2pa_p_ai,
+            confidence=c2pa_conf,
+            severity=c2pa_sev,
+            evidence=c2pa_info,
+            plain_language=c2pa_plain,
         )
     )
 
@@ -305,7 +418,7 @@ def metadata_signal(
     is_screenshot_match = bool(exact or near)
     has_screenshot_evidence = is_screenshot_match or in_phone_aspect
 
-    if (not has_exif_at_all) and (not has_c2pa):
+    if (not has_exif_at_all) and (not c2pa_info["present"]):
         if has_screenshot_evidence:
             p_vac = 0.78
             conf_vac = 0.7
