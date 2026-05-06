@@ -15,13 +15,13 @@ from ..pipeline.layer5_biological import run_biological_layer_image
 from ..utils.io import load_image_rgb
 
 
-def analyze_image(raw: bytes) -> Tuple[List[SignalResult], List[HeatmapAsset]]:
+def analyze_image(raw: bytes, filename: str | None = None) -> Tuple[List[SignalResult], List[HeatmapAsset]]:
     pil, rgb = load_image_rgb(raw)
     signals: List[SignalResult] = []
     heatmaps: List[HeatmapAsset] = []
 
     signals.extend(run_reverse_layer(pil))
-    signals.extend(run_metadata_layer(raw, pil.size))
+    signals.extend(run_metadata_layer(raw, pil.size, filename=filename))
     signals.extend(run_physics_layer(rgb, raw_bytes=raw))
 
     ml_sigs, ml_heat = ml_image(pil, rgb)

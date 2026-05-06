@@ -53,22 +53,26 @@ TRUST: Dict[str, float] = {
     "provenance_vacuum": 0.7,
     # Layer 3 — physics. Useful corroboration, never primary on JPEG inputs.
     "fft_slope": 0.55,
+    "fft_anisotropy": 0.55,
+    "hf_energy_ratio": 0.6,
     "benford_dct": 0.5,
     "wavelet_kurtosis": 0.4,
-    "prnu_residual": 0.2,            # near-uninformative on consumer JPEGs
+    "prnu_residual": 0.4,
     "double_jpeg": 0.5,
     # Layer 4 — ML detectors. The most reliable directional signal we
     # have on consumer images. Weighted to dominate the fusion when a
     # clear majority of detectors agree.
-    "ml_image": 2.6,
-    "ml_clip": 1.9,
-    "ml_face": 2.6,
+    "ml_image": 1.7,
+    "ml_clip": 1.5,
+    "ml_face": 1.9,
     "ml_audio": 2.0,
     # Layer 5 — semantic image checks are *very* noisy on web/CDN photos.
     # Visible to the user but near-zero weight in fusion.
     "light_consistency": 0.08,
     "color_naturalness": 0.05,
     "edge_perfection": 0.08,
+    "facial_symmetry": 0.9,
+    "eye_catchlight_consistency": 0.85,
     "rppg_heartbeat": 1.1,
     "temporal_stability": 0.6,
     "vocal_tract_plausibility": 0.95,
@@ -284,11 +288,13 @@ def label_for(
 
     # 4. Real-leaning.
     if p_ai <= 0.32:
-        # Don't let provenance vacuum flip a confident ML-real call.
+        # Be conservative with "real" claims: require explicit ML confirmation.
         if sg_ai and not ml_says_real:
             return Verdict.inconclusive, (
                 "Inconclusive — provenance flags AI but ML detectors disagree"
             )
+        if not ml_says_real:
+            return Verdict.inconclusive, "Inconclusive — weak evidence for real"
         return Verdict.likely_real, "Likely real"
     if p_ai <= 0.45:
         # Soft real lean — provenance can pull this back to Inconclusive
@@ -297,7 +303,7 @@ def label_for(
             return Verdict.inconclusive, (
                 "Inconclusive — provenance flags AI"
             )
-        if ml_says_real:
+        if ml_strong_real:
             return Verdict.likely_real, "Likely real"
         return Verdict.inconclusive, "Leaning real"
 

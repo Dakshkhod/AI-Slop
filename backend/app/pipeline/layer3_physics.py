@@ -22,7 +22,7 @@ from typing import List, Tuple
 import numpy as np
 import pywt
 from PIL import Image
-from scipy import fftpack, ndimage, signal, stats
+from scipy import fftpack, stats
 
 from ..schemas import SignalResult, SignalSeverity
 from ..utils.io import to_grayscale
@@ -47,6 +47,23 @@ def _severity(p_ai: float) -> SignalSeverity:
     if p_ai <= 0.35:
         return SignalSeverity.pass_
     return SignalSeverity.info
+
+
+def _wavelet_noise_residual(channel: np.ndarray) -> np.ndarray:
+    """Extract high-frequency residual via wavelet denoising."""
+    x = channel.astype(np.float32) / 255.0
+    coeffs = pywt.wavedec2(x, "db8", level=3)
+    thresholded = [coeffs[0]]
+    for level in coeffs[1:]:
+        new_level = []
+        for sub in level:
+            sigma = np.median(np.abs(sub)) / 0.6745 + 1e-6
+            t = sigma * 1.8
+            new_level.append(pywt.threshold(sub, t, mode="soft"))
+        thresholded.append(tuple(new_level))
+    denoised = pywt.waverec2(thresholded, "db8")
+    denoised = denoised[: channel.shape[0], : channel.shape[1]]
+    return x - denoised
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +165,124 @@ def fft_slope(gray: np.ndarray) -> SignalResult:
             id="fft_slope",
             layer=3,
             name="FFT 1/f power-spectrum slope",
+            domain="thermodynamic",
+            p_ai=0.5,
+            confidence=0.0,
+            error=str(exc),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Signal 1b — FFT anisotropy + high-frequency suppression
+# ---------------------------------------------------------------------------
+
+
+def fft_anisotropy(gray: np.ndarray) -> SignalResult:
+    """Directional energy imbalance in frequency domain.
+
+    Diffusion outputs often leak mild axis-aligned anisotropy from latent
+    upsampling and attention tiling. Natural photos are usually more isotropic
+    after radial averaging.
+    """
+    try:
+        g = gray.astype(np.float32)
+        f = np.fft.fftshift(np.fft.fft2(g - g.mean()))
+        mag = np.abs(f) + 1e-9
+        h, w = mag.shape
+        cy, cx = h // 2, w // 2
+        radius = max(8, min(cx, cy) // 2)
+        angles = [0.0, 45.0, 90.0, 135.0]
+        powers: List[float] = []
+        t = np.arange(-radius, radius, dtype=np.float32)
+        for angle in angles:
+            rad = np.deg2rad(angle)
+            xs = np.clip((cx + t * np.cos(rad)).astype(np.int32), 0, w - 1)
+            ys = np.clip((cy + t * np.sin(rad)).astype(np.int32), 0, h - 1)
+            powers.append(float(mag[ys, xs].mean()))
+        anis = float(np.std(powers) / (np.mean(powers) + 1e-9))
+        p_ai = _logistic(anis, k=10.0, x0=0.14)
+        return SignalResult(
+            id="fft_anisotropy",
+            layer=3,
+            name="FFT directional anisotropy",
+            description=(
+                "Natural photos are frequency-isotropic on average. "
+                "Diffusion pipelines often leave axis/diagonal anisotropy."
+            ),
+            domain="thermodynamic",
+            p_ai=float(p_ai),
+            confidence=0.6,
+            severity=_severity(p_ai),
+            evidence={
+                "anisotropy": round(anis, 5),
+                "directional_powers": [round(v, 4) for v in powers],
+            },
+            plain_language=(
+                f"Directional FFT anisotropy = {anis:.3f} "
+                "(higher indicates generator artefacts)."
+            ),
+        )
+    except Exception as exc:
+        return SignalResult(
+            id="fft_anisotropy",
+            layer=3,
+            name="FFT directional anisotropy",
+            domain="thermodynamic",
+            p_ai=0.5,
+            confidence=0.0,
+            error=str(exc),
+        )
+
+
+def hf_energy_ratio(gray: np.ndarray) -> SignalResult:
+    """Very-high-frequency to mid-frequency energy ratio.
+
+    Modern diffusion models frequently under-represent the top end of the
+    spatial spectrum after denoising and safety post-processing.
+    """
+    try:
+        f = np.fft.fftshift(np.fft.fft2(gray.astype(np.float32)))
+        mag = np.abs(f) + 1e-9
+        h, w = mag.shape
+        cy, cx = h // 2, w // 2
+        yy, xx = np.ogrid[-cy : h - cy, -cx : w - cx]
+        dist = np.sqrt(xx * xx + yy * yy)
+        max_r = float(max(1.0, min(cx, cy)))
+        nr = dist / max_r
+
+        hf = mag[nr > 0.92]
+        mf = mag[(nr > 0.3) & (nr <= 0.7)]
+        if hf.size < 32 or mf.size < 32:
+            raise ValueError("insufficient frequency bins")
+        ratio = float(hf.mean() / (mf.mean() + 1e-9))
+        # Lower ratio => more suspicious.
+        p_ai = _logistic(0.07 - ratio, k=26.0, x0=0.0)
+        return SignalResult(
+            id="hf_energy_ratio",
+            layer=3,
+            name="High-frequency energy preservation",
+            description=(
+                "Measures whether very-high spatial frequencies are "
+                "under-represented relative to mid-band content."
+            ),
+            domain="thermodynamic",
+            p_ai=float(p_ai),
+            confidence=0.62,
+            severity=_severity(p_ai),
+            evidence={
+                "hf_to_mf_ratio": round(ratio, 6),
+                "hf_threshold_norm_radius": 0.92,
+            },
+            plain_language=(
+                f"HF/MF energy ratio = {ratio:.4f}; unusually low values "
+                "are common in denoised diffusion outputs."
+            ),
+        )
+    except Exception as exc:
+        return SignalResult(
+            id="hf_energy_ratio",
+            layer=3,
+            name="High-frequency energy preservation",
             domain="thermodynamic",
             p_ai=0.5,
             confidence=0.0,
@@ -326,77 +461,115 @@ def wavelet_kurtosis(gray: np.ndarray) -> SignalResult:
 # ---------------------------------------------------------------------------
 
 
-def prnu_noise(gray: np.ndarray, jpeg_block_energy: float = 0.0) -> SignalResult:
-    """Sensor-noise residual analysis — *conservative* version.
+def prnu_noise(rgb: np.ndarray, jpeg_block_energy: float = 0.0) -> SignalResult:
+    """Sensor-noise residual analysis with periodicity and cross-channel checks.
 
-    Without a known reference camera, PRNU cannot reliably distinguish
-    "real photo" from "AI image", because lossy JPEG compression produces
-    block-correlated residuals that mimic sensor noise. We therefore:
-
-      • Only flag when *all three* indicators (low energy, low autocorr,
-        Gaussian-like kurtosis) point toward "no sensor noise".
-      • Damp confidence sharply when JPEG block energy is high — in that
-        regime any "real-looking" residual is just JPEG artefacts.
-      • Cap p_ai contribution; never report > 0.7 from this signal alone.
+    Key intuition:
+      • Real sensor noise is weakly correlated across RGB channels.
+      • Generator residuals are often jointly produced from one latent and can
+        show stronger channel correlation and periodic structure.
     """
     try:
-        coeffs = pywt.wavedec2(gray.astype(np.float32), "db8", level=3)
-        thresholded = [coeffs[0]]
-        for level in coeffs[1:]:
-            new_level = []
-            for sub in level:
-                sigma = np.median(np.abs(sub)) / 0.6745 + 1e-6
-                t = sigma * 1.8
-                new_level.append(pywt.threshold(sub, t, mode="soft"))
-            thresholded.append(tuple(new_level))
-        denoised = pywt.waverec2(thresholded, "db8")
-        denoised = denoised[: gray.shape[0], : gray.shape[1]]
-        residual = gray.astype(np.float32) - denoised
+        if rgb.ndim != 3 or rgb.shape[2] < 3:
+            raise ValueError("expected RGB image")
+        r = _wavelet_noise_residual(rgb[..., 0])
+        g = _wavelet_noise_residual(rgb[..., 1])
+        b = _wavelet_noise_residual(rgb[..., 2])
+        residual_gray = (r + g + b) / 3.0
 
-        residual_std = float(np.std(residual))
-        residual_kurt = float(stats.kurtosis(residual.ravel(), fisher=True, bias=False))
-        rh = residual[:, 1:] * residual[:, :-1]
-        rv = residual[1:, :] * residual[:-1, :]
+        residual_std = float(np.std(residual_gray))
+        residual_kurt = float(stats.kurtosis(residual_gray.ravel(), fisher=True, bias=False))
+        rh = residual_gray[:, 1:] * residual_gray[:, :-1]
+        rv = residual_gray[1:, :] * residual_gray[:-1, :]
         autocorr = float((rh.mean() + rv.mean()) / (residual_std**2 + 1e-9))
 
-        # Three independent "no real sensor here" indicators in [0,1].
-        i_low_energy = _logistic(0.6 - residual_std, k=6.0, x0=0.0)
-        i_low_corr = _logistic(0.04 - abs(autocorr), k=80.0, x0=0.0)
-        i_gauss = _logistic(0.3 - abs(residual_kurt), k=6.0, x0=0.0)
+        # 2D autocorrelation periodic-peak ratio.
+        ac = np.real(np.fft.ifft2(np.abs(np.fft.fft2(residual_gray)) ** 2))
+        ac = np.fft.fftshift(ac)
+        ac = ac / (np.max(np.abs(ac)) + 1e-9)
+        h, w = ac.shape
+        cy, cx = h // 2, w // 2
+        ac_no_center = ac.copy()
+        ac_no_center[max(0, cy - 5) : cy + 5, max(0, cx - 5) : cx + 5] = 0
+        center_patch = ac[max(0, cy - 20) : cy + 20, max(0, cx - 20) : cx + 20]
+        peak_ratio = float(
+            np.max(np.abs(ac_no_center)) / (np.mean(np.abs(center_patch)) + 1e-9)
+        )
 
-        # Geometric mean → only fire when ALL three agree (vs. any-one-fires).
-        agree = (i_low_energy * i_low_corr * i_gauss) ** (1 / 3)
-        # Map to a damped p_ai capped at 0.7
-        p_ai = 0.5 + (agree - 0.5) * 0.4
+        # Cross-channel residual correlation (AI tends higher).
+        rg_corr = float(np.corrcoef(r.ravel(), g.ravel())[0, 1])
+        rb_corr = float(np.corrcoef(r.ravel(), b.ravel())[0, 1])
+        gb_corr = float(np.corrcoef(g.ravel(), b.ravel())[0, 1])
+        mean_corr = float((abs(rg_corr) + abs(rb_corr) + abs(gb_corr)) / 3.0)
 
-        # JPEG damping: the higher the block-grid energy, the less we trust
-        # PRNU at all. Real photos saved as JPEG by phones also fall here.
-        jpeg_factor = float(np.clip(1.0 - (jpeg_block_energy - 6.0) / 8.0, 0.2, 1.0))
-        confidence = 0.45 * jpeg_factor
+        # Legacy indicators retained but weaker than periodicity/correlation.
+        i_low_energy = _logistic(0.010 - residual_std, k=150.0, x0=0.0)
+        i_low_corr = _logistic(0.035 - abs(autocorr), k=60.0, x0=0.0)
+        i_gauss = _logistic(0.25 - abs(residual_kurt), k=5.0, x0=0.0)
+
+        # Real JPEG photos exhibit significant periodicity from 8-px block
+        # grids and Bayer demosaicing — both create high cross-channel
+        # correlation too. Raise thresholds so this signal only fires when
+        # the structure is unusually strong.
+        i_periodic = _logistic(peak_ratio, k=6.0, x0=0.45)
+        i_color_corr = _logistic(mean_corr, k=8.0, x0=0.55)
+
+        # Weighted blend: keep these as supporting evidence rather than primary.
+        p_ai = float(
+            np.clip(
+                0.20 * i_low_energy
+                + 0.15 * i_low_corr
+                + 0.15 * i_gauss
+                + 0.25 * i_periodic
+                + 0.25 * i_color_corr,
+                0.0,
+                1.0,
+            )
+        )
+        # Centre the prior near 0.5 so this signal doesn't drag everything
+        # towards "AI" by default on noisy JPEGs.
+        p_ai = 0.4 + 0.4 * p_ai
+
+        # JPEG reduces trust further; this signal is supplementary on consumer
+        # imagery and should not single-handedly flip verdicts.
+        jpeg_factor = float(np.clip(1.0 - (jpeg_block_energy - 10.0) / 16.0, 0.35, 1.0))
+        confidence = float(np.clip(0.40 * jpeg_factor, 0.18, 0.5))
 
         plain = (
-            f"Sensor-noise residual σ={residual_std:.2f}, "
-            f"lag-1 autocorr={autocorr:.3f}, kurt={residual_kurt:+.2f}. "
-            f"PRNU is unreliable on consumer JPEGs — confidence damped."
+            f"Residual periodicity ratio={peak_ratio:.3f}, "
+            f"RGB-noise correlation={mean_corr:.3f}, "
+            f"lag-1 autocorr={autocorr:.3f}."
         )
         return SignalResult(
             id="prnu_residual",
             layer=3,
             name="PRNU / sensor noise residual",
             description=(
-                "Sensor noise fingerprint analysis. Without a reference "
-                "camera this is a weak prior, especially on JPEG inputs."
+                "Wavelet residual analysis with periodicity and cross-channel "
+                "noise correlation checks. Periodic and highly correlated "
+                "residuals are suspicious for generated imagery."
             ),
             domain="quantum",
-            p_ai=float(np.clip(p_ai, 0.3, 0.7)),
+            p_ai=float(p_ai),
             confidence=confidence,
             severity=_severity(p_ai),
             evidence={
                 "residual_std": round(residual_std, 4),
                 "autocorrelation_lag1": round(autocorr, 4),
                 "residual_kurtosis": round(residual_kurt, 4),
+                "periodic_peak_ratio": round(peak_ratio, 4),
+                "channel_noise_corr_mean": round(mean_corr, 4),
+                "corr_rg": round(rg_corr, 4),
+                "corr_rb": round(rb_corr, 4),
+                "corr_gb": round(gb_corr, 4),
                 "jpeg_factor": round(jpeg_factor, 3),
-                "agreement": round(agree, 3),
+                "indicators": {
+                    "low_energy": round(float(i_low_energy), 4),
+                    "low_autocorr": round(float(i_low_corr), 4),
+                    "gaussian_like": round(float(i_gauss), 4),
+                    "periodic_noise": round(float(i_periodic), 4),
+                    "cross_channel_corr": round(float(i_color_corr), 4),
+                },
             },
             plain_language=plain,
         )
@@ -530,13 +703,19 @@ def run_physics_layer(rgb: np.ndarray, raw_bytes: bytes | None = None) -> List[S
     block_energy = float(djpeg.evidence.get("block_energy_ratio") or 0.0)
 
     sigs: List[SignalResult] = []
-    for s in (fft_slope(gray), benford_dct(gray), wavelet_kurtosis(gray)):
+    for s in (
+        fft_slope(gray),
+        fft_anisotropy(gray),
+        hf_energy_ratio(gray),
+        benford_dct(gray),
+        wavelet_kurtosis(gray),
+    ):
         # Damp confidence when JPEG block energy is high; these signals
         # become unreliable in that regime.
         if not s.error and block_energy > 8.0:
             s.confidence *= float(max(0.3, 1.0 - (block_energy - 8.0) / 12.0))
             s.evidence["jpeg_damped"] = True
         sigs.append(s)
-    sigs.append(prnu_noise(gray, jpeg_block_energy=block_energy))
+    sigs.append(prnu_noise(rgb, jpeg_block_energy=block_energy))
     sigs.append(djpeg)
     return sigs

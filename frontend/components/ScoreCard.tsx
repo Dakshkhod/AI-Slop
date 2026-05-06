@@ -43,7 +43,15 @@ function ConfidenceArc({ score, uncertainty }: { score: number; uncertainty: num
       <div className="absolute inset-0 flex flex-col items-center justify-center">
         <span className="text-5xl font-bold tabular-nums text-ink-50">{Math.round(score)}</span>
         <span className="text-[11px] uppercase tracking-[0.2em] text-ink-300">authenticity</span>
-        <span className="mt-1 text-xs text-ink-300">± {uncertainty.toFixed(1)}</span>
+        <div className="mt-1 flex items-center gap-1 text-xs text-ink-300">
+          <span>± {uncertainty.toFixed(1)}</span>
+          <span
+            className="inline-grid h-4 w-4 place-content-center rounded-full border border-ink-600 text-[10px]"
+            title="Scores can change between uploads when metadata is stripped or files are recompressed (screenshots, messaging apps, re-saves). Upload the original file for the most reliable result."
+          >
+            i
+          </span>
+        </div>
       </div>
     </div>
   );

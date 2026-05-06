@@ -107,8 +107,24 @@ def _ai_software_signature(software: str) -> Optional[str]:
     return None
 
 
+def _filename_screenshot_hint(filename: str | None) -> bool:
+    if not filename:
+        return False
+    f = filename.lower()
+    needles = [
+        "screenshot",
+        "screen shot",
+        "screen_",
+        "capture",
+        "snip",
+        "scr_",
+        "img_e",
+    ]
+    return any(n in f for n in needles)
+
+
 def metadata_signal(
-    raw: bytes, image_size: Tuple[int, int]
+    raw: bytes, image_size: Tuple[int, int], filename: str | None = None
 ) -> List[SignalResult]:
     """Produce 1–4 metadata-related signals from the raw bytes."""
     out: List[SignalResult] = []
@@ -207,6 +223,13 @@ def metadata_signal(
     near = exact or near_match_device(w, h, tol=2)
     in_phone_aspect = aspect_in_phone_range(w, h)
 
+    filename_hint = _filename_screenshot_hint(filename)
+    with_png = False
+    try:
+        with_png = Image.open(io.BytesIO(raw)).format == "PNG"
+    except Exception:
+        with_png = False
+
     if exact:
         p_ai = 0.85
         sev = SignalSeverity.flag
@@ -230,6 +253,23 @@ def metadata_signal(
         sev = SignalSeverity.info
         plain = f"Resolution {w}×{h} does not match a known device screen."
 
+    # Filename-based screenshot evidence is near-deterministic in practice.
+    if filename_hint:
+        p_ai = max(p_ai, 0.98)
+        sev = SignalSeverity.flag
+        plain = (
+            f"Filename '{filename}' contains screenshot marker(s) and strongly "
+            "indicates a screen capture / re-upload."
+        )
+    elif with_png and in_phone_aspect and n_present == 0:
+        # Secondary screenshot prior: PNG + phone-ish dimensions + no EXIF.
+        p_ai = max(p_ai, 0.8)
+        sev = SignalSeverity.warn
+        plain = (
+            "PNG with phone-like aspect and no sensor EXIF — likely screenshot "
+            "or exported synthetic image."
+        )
+
     out.append(
         SignalResult(
             id="screenshot_fingerprint",
@@ -248,6 +288,8 @@ def metadata_signal(
                 "height": h,
                 "matched_device": exact.name if exact else (near.name if near else None),
                 "phone_aspect": in_phone_aspect,
+                "filename_screenshot_hint": filename_hint,
+                "is_png": with_png,
             },
             plain_language=plain,
         )
@@ -308,6 +350,6 @@ def metadata_signal(
 
 
 def run_metadata_layer(
-    raw: bytes, image_size: Tuple[int, int]
+    raw: bytes, image_size: Tuple[int, int], filename: str | None = None
 ) -> List[SignalResult]:
-    return metadata_signal(raw, image_size)
+    return metadata_signal(raw, image_size, filename=filename)

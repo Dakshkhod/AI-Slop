@@ -82,7 +82,6 @@ export default function HomePage() {
               </div>
               <div className="space-y-6 lg:col-span-2">
                 <DomainBreakdown data={result.domain_real_confidence} />
-                <ConsistencyTip />
                 <ModelBlock versions={result.model_versions} />
                 <PrivacyBlock />
               </div>
@@ -199,25 +198,6 @@ function PrivacyBlock() {
   );
 }
 
-function ConsistencyTip() {
-  return (
-    <section className="rounded-3xl border border-amber-600/30 bg-amber-500/10 p-5 backdrop-blur">
-      <h3 className="mb-2 text-sm font-semibold uppercase tracking-[0.2em] text-amber-300">
-        Why scores can change between uploads
-      </h3>
-      <p className="text-sm text-ink-200">
-        Screenshotting an image, downloading and re-uploading it, or
-        compressing it through a messaging app produces a{" "}
-        <em>different file</em> with different bytes. EXIF and C2PA are
-        usually destroyed; new compression artefacts appear. The detector
-        analyses what it sees, so two copies of the same source can score
-        differently. For the most reliable result, upload the original
-        file (download the image directly, don&apos;t screenshot it).
-      </p>
-    </section>
-  );
-}
-
 function FeatureGrid() {
   const items = [
     {
@@ -232,7 +212,7 @@ function FeatureGrid() {
     },
     {
       h: "ML ensemble",
-      p: "Pretrained transformer detector + GradCAM-style heatmaps. Optional, lazy-loaded, swappable.",
+      p: "Pretrained transformer detector + model-attribution heatmaps. Optional, lazy-loaded, swappable.",
       d: "Layer 4",
     },
     {

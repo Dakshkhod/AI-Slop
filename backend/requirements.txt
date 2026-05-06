@@ -37,6 +37,7 @@ soundfile>=0.12
 # them — keep them optional in environments without GPU/heavy deps.
 torch>=2.5; python_version < "3.14"
 torchvision>=0.20; python_version < "3.14"
+timm>=1.0
 transformers>=4.46
 huggingface-hub>=0.26
 xgboost>=2.1

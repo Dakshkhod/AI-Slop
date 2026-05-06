@@ -26,7 +26,7 @@ def analyze(raw: bytes, filename: str, modality: Modality) -> AnalyzeResponse:
     log.info("[%s] Analysing %s (%s, %d bytes)", request_id, filename, modality, len(raw))
 
     if modality == Modality.image:
-        signals, heatmaps = analyze_image(raw)
+        signals, heatmaps = analyze_image(raw, filename=filename)
     elif modality == Modality.video:
         signals, heatmaps = analyze_video(raw, filename)
     elif modality == Modality.audio:
@@ -36,6 +36,13 @@ def analyze(raw: bytes, filename: str, modality: Modality) -> AnalyzeResponse:
 
     fused = fuse_full(signals)
     elapsed_ms = int((time.perf_counter() - t0) * 1000)
+    custom_image_model = None
+    if modality == Modality.image:
+        for s in signals:
+            if s.id == "ml_image" and not s.error:
+                custom_image_model = s.evidence.get("checkpoint")
+                if custom_image_model:
+                    break
 
     return AnalyzeResponse(
         request_id=request_id,
@@ -55,6 +62,7 @@ def analyze(raw: bytes, filename: str, modality: Modality) -> AnalyzeResponse:
         processing_ms=elapsed_ms,
         model_versions={
             "image_model": settings.image_model_id,
+            "custom_image_model": custom_image_model or "unavailable",
             "audio_model": settings.audio_model_id,
             "service_version": "0.1.0",
         },

@@ -204,11 +204,147 @@ def edge_perfection(rgb: np.ndarray) -> SignalResult:
         )
 
 
+def facial_symmetry(rgb: np.ndarray) -> SignalResult:
+    """Detect unnaturally symmetric faces (common in synthetic portraits)."""
+    try:
+        gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+        face_cascade = cv2.CascadeClassifier(
+            cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+        )
+        faces = face_cascade.detectMultiScale(
+            gray, scaleFactor=1.15, minNeighbors=5, minSize=(80, 80)
+        )
+        if len(faces) == 0:
+            raise ValueError("no face detected")
+
+        x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
+        face = gray[y : y + h, x : x + w].astype(np.float32)
+        mid = face.shape[1] // 2
+        left = face[:, :mid]
+        right = face[:, face.shape[1] - mid :]
+        right_flip = np.fliplr(right)
+        if left.size == 0 or right_flip.size == 0:
+            raise ValueError("face crop too small")
+
+        asym = float(np.mean(np.abs(left - right_flip)) / 255.0)
+        # Lower asymmetry means "too perfect".
+        p_ai = _logistic(0.045 - asym, k=75.0, x0=0.0)
+        return SignalResult(
+            id="facial_symmetry",
+            layer=5,
+            name="Facial asymmetry plausibility",
+            description=(
+                "Real faces have measurable left-right asymmetry. "
+                "Overly symmetric portraits are suspicious."
+            ),
+            domain="biological",
+            p_ai=float(p_ai),
+            confidence=0.65,
+            severity=_severity(p_ai),
+            evidence={
+                "face_box": [int(x), int(y), int(w), int(h)],
+                "mean_asymmetry": round(asym, 5),
+            },
+            plain_language=(
+                f"Left-right facial asymmetry={asym:.4f}; unusually symmetric "
+                "faces are common in generated portraits."
+            ),
+        )
+    except Exception as exc:
+        return SignalResult(
+            id="facial_symmetry",
+            layer=5,
+            name="Facial asymmetry plausibility",
+            domain="biological",
+            p_ai=0.5,
+            confidence=0.0,
+            error=str(exc),
+        )
+
+
+def eye_catchlight_consistency(rgb: np.ndarray) -> SignalResult:
+    """Check whether bright eye reflections are geometrically consistent."""
+    try:
+        gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+        face_cascade = cv2.CascadeClassifier(
+            cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+        )
+        eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye.xml")
+        faces = face_cascade.detectMultiScale(
+            gray, scaleFactor=1.15, minNeighbors=5, minSize=(80, 80)
+        )
+        if len(faces) == 0:
+            raise ValueError("no face detected")
+        x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
+        face = gray[y : y + h, x : x + w]
+        eyes = eye_cascade.detectMultiScale(face, scaleFactor=1.1, minNeighbors=6)
+        if len(eyes) < 2:
+            raise ValueError("fewer than two eyes detected")
+
+        # Use the two largest eye candidates.
+        eyes_sorted = sorted(eyes, key=lambda e: e[2] * e[3], reverse=True)[:2]
+        eyes_sorted = sorted(eyes_sorted, key=lambda e: e[0])  # left, right
+
+        points = []
+        for ex, ey, ew, eh in eyes_sorted:
+            patch = face[ey : ey + eh, ex : ex + ew].astype(np.float32)
+            if patch.size == 0:
+                raise ValueError("empty eye patch")
+            thr = np.quantile(patch, 0.93)
+            mask = patch >= thr
+            if mask.sum() < 4:
+                raise ValueError("no catchlight pixels")
+            yy, xx = np.where(mask)
+            # Normalized position inside eye patch.
+            points.append((float(xx.mean() / max(1, ew)), float(yy.mean() / max(1, eh))))
+
+        (lx, ly), (rx, ry) = points
+        vertical_diff = abs(ly - ry)
+        # Mirror-aware horizontal consistency.
+        horizontal_mirror_diff = abs(lx - (1.0 - rx))
+        inconsistency = 0.6 * vertical_diff + 0.4 * horizontal_mirror_diff
+        p_ai = _logistic(inconsistency, k=11.0, x0=0.2)
+        return SignalResult(
+            id="eye_catchlight_consistency",
+            layer=5,
+            name="Eye-reflection consistency",
+            description=(
+                "In real portraits, eye catchlights align with one lighting "
+                "setup. Large cross-eye mismatch is suspicious."
+            ),
+            domain="biological",
+            p_ai=float(p_ai),
+            confidence=0.62,
+            severity=_severity(p_ai),
+            evidence={
+                "vertical_diff": round(vertical_diff, 4),
+                "horizontal_mirror_diff": round(horizontal_mirror_diff, 4),
+                "combined_inconsistency": round(inconsistency, 4),
+            },
+            plain_language=(
+                f"Eye catchlight mismatch={inconsistency:.3f} "
+                "(higher means lighting inconsistency)."
+            ),
+        )
+    except Exception as exc:
+        return SignalResult(
+            id="eye_catchlight_consistency",
+            layer=5,
+            name="Eye-reflection consistency",
+            domain="biological",
+            p_ai=0.5,
+            confidence=0.0,
+            error=str(exc),
+        )
+
+
 def run_biological_layer_image(rgb: np.ndarray) -> List[SignalResult]:
     return [
         light_consistency(rgb),
         color_naturalness(rgb),
         edge_perfection(rgb),
+        facial_symmetry(rgb),
+        eye_catchlight_consistency(rgb),
     ]
 
 

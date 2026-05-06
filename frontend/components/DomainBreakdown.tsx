@@ -10,17 +10,17 @@ const LABELS: Record<keyof DBT, { label: string; hint: string; color: string }> 
   },
   quantum: {
     label: "Quantum / sensor",
-    hint: "PRNU, sensor noise residual",
+    hint: "PRNU residual, periodic noise, RGB-noise correlation",
     color: "from-violet-500 to-fuchsia-400",
   },
   thermodynamic: {
     label: "Thermodynamic",
-    hint: "FFT 1/f, Benford, wavelet kurtosis",
+    hint: "FFT slope, anisotropy, HF energy, Benford, wavelets",
     color: "from-emerald-500 to-teal-400",
   },
   biological: {
     label: "Biological",
-    hint: "rPPG, vocal tract, microsaccades",
+    hint: "Facial asymmetry, eye reflections, rPPG, vocal tract",
     color: "from-rose-500 to-pink-400",
   },
   semantic: {

@@ -314,17 +314,13 @@ _MODEL_TRUST: Dict[str, float] = {
 }
 
 
-def _soften(p: float, temperature: float = 0.55) -> float:
-    """Pull extreme outputs toward 0.5 to penalise uncalibrated saturation.
-
-    A perfectly calibrated model rarely outputs 1.0; pretrained AI
-    detectors do all the time. Halving the logit temperature compresses
-    the [0,1] range so 1.0 becomes ~0.93 and 0.999 becomes ~0.88.
-    """
+def _temperature_calibrate(p: float, temperature: float = 1.35) -> float:
+    """Logit temperature scaling (T>1 softens overconfident probabilities)."""
     eps = 1e-4
     p = max(eps, min(1 - eps, p))
     logit = np.log(p / (1 - p))
-    return float(1.0 / (1.0 + np.exp(-logit * temperature)))
+    calibrated = logit / temperature
+    return float(1.0 / (1.0 + np.exp(-calibrated)))
 
 
 def _aggregate_models(
@@ -335,7 +331,7 @@ def _aggregate_models(
 ) -> SignalResult:
     """Trust-weighted, saturation-aware ensemble aggregation."""
     raw = np.array(per_model, dtype=np.float64)
-    softened = np.array([_soften(p) for p in raw])
+    softened = np.array([_temperature_calibrate(p) for p in raw])
 
     # Fetch trust per model (defaults to 0.6 for unknown ids).
     model_ids_full = list(per_model_table.keys())
@@ -435,14 +431,167 @@ def _aggregate_models(
 
 
 # ---------------------------------------------------------------------------
+# Attribution heatmap from model gradients
+# ---------------------------------------------------------------------------
+
+
+def _label_vote_from_id2label(label: str) -> str:
+    norm = str(label).lower().replace("-", "_").replace(" ", "_")
+    if any(k in norm for k in _AI_LABELS):
+        return "ai"
+    if any(k in norm for k in _REAL_LABELS):
+        return "real"
+    return "unknown"
+
+
+def _ai_prob_from_logits(logits, id2label) -> "Any":
+    """Return differentiable ai probability tensor from model logits."""
+    import torch  # type: ignore
+
+    probs = torch.softmax(logits, dim=-1)
+    ai_idx: List[int] = []
+    real_idx: List[int] = []
+    for i in range(int(probs.shape[-1])):
+        label = id2label.get(i, id2label.get(str(i), str(i)))
+        vote = _label_vote_from_id2label(label)
+        if vote == "ai":
+            ai_idx.append(i)
+        elif vote == "real":
+            real_idx.append(i)
+    if ai_idx:
+        return probs[ai_idx].sum()
+    if real_idx:
+        return 1.0 - probs[real_idx].sum()
+    # Opaque labels fallback: use top class probability.
+    return probs.max()
+
+
+def _ml_attribution_heatmap(pil: Image.Image, pipes: List[Tuple[str, Any]]) -> np.ndarray | None:
+    """Gradient attribution map from the first usable model."""
+    try:
+        import torch  # type: ignore
+    except Exception:
+        return None
+
+    for _, pipe in pipes:
+        try:
+            model = getattr(pipe, "model", None)
+            processor = getattr(pipe, "image_processor", None)
+            if model is None or processor is None:
+                continue
+            if not hasattr(model, "forward"):
+                continue
+
+            model.eval()
+            device = next(model.parameters()).device
+            inputs = processor(images=pil, return_tensors="pt")
+            px = inputs["pixel_values"].to(device)
+            px = px.clone().detach().requires_grad_(True)
+            out = model(pixel_values=px)
+            logits = out.logits[0]
+            id2label = getattr(getattr(model, "config", None), "id2label", {}) or {}
+            ai_prob = _ai_prob_from_logits(logits, id2label)
+            model.zero_grad(set_to_none=True)
+            ai_prob.backward()
+            grad = px.grad
+            if grad is None:
+                continue
+            # Channel-average absolute gradient saliency.
+            heat = grad.detach().abs().mean(dim=1)[0].float().cpu().numpy()
+            return heat
+        except Exception as e:
+            log.debug("Attribution heatmap failed on model: %s", e)
+            continue
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Public APIs
 # ---------------------------------------------------------------------------
 
 
 def ml_image(pil: Image.Image, rgb: np.ndarray) -> Tuple[List[SignalResult], List[HeatmapAsset]]:
-    """Runs the multi-model ensemble + CLIP. Returns one signal per detector."""
+    """Run primary custom classifier; fallback to HF ensemble if unavailable."""
     signals: List[SignalResult] = []
     heatmaps: List[HeatmapAsset] = []
+
+    # Primary path: local TruthLens checkpoint classifier (v3 = ConvNeXt-base 384).
+    try:
+        from .detector import check_ml_classifier
+
+        out = check_ml_classifier(pil)
+        ai_prob_raw = float(out["detail"]["ai_probability"])
+        real_prob_raw = float(out["detail"]["real_probability"])
+        backbone = str(out["detail"].get("backbone", "unknown"))
+        img_size = int(out["detail"].get("img_size", 0) or 0)
+        # The v3 checkpoint already had its temperature fitted on a held-out
+        # set (see `T.json` → ECE drops from ~0.05 to ~0.0006), and is much
+        # better calibrated than v2. Keep only a light saturation guard for
+        # out-of-distribution web inputs; do NOT double-temperature-scale.
+        ai_prob = float(np.clip(ai_prob_raw, 0.02, 0.98))
+        is_saturated = ai_prob_raw >= 0.98 or ai_prob_raw <= 0.02
+        if is_saturated:
+            # Trust the saturated call but reduce its weight a little so a
+            # single OOD failure cannot dominate the verdict.
+            confidence = 0.65
+        else:
+            margin = abs(ai_prob - 0.5)
+            confidence = float(np.clip(0.55 + margin * 0.9, 0.55, 0.92))
+        real_prob = 1.0 - ai_prob
+        plain = (
+            f"Custom classifier (v3, {backbone} @ {img_size}px) "
+            f"calibrated p(AI)={ai_prob:.2f} (raw {ai_prob_raw:.2f})"
+            + (", saturated → confidence reduced" if is_saturated else "")
+            + "."
+        )
+        evidence = {
+            **out["detail"],
+            "ai_probability_raw": round(ai_prob_raw, 4),
+            "real_probability_raw": round(real_prob_raw, 4),
+            "ai_probability_calibrated": round(ai_prob, 4),
+            "real_probability_calibrated": round(real_prob, 4),
+            "saturated": is_saturated,
+            "raw_clip_range": [0.02, 0.98],
+        }
+        signals.append(
+            SignalResult(
+                id="ml_image",
+                layer=4,
+                name=f"Custom {backbone} classifier (v3)",
+                description=(
+                    "Local checkpoint classifier (`best_model_v3.pth`, "
+                    "ConvNeXt-base 384) trained for real-vs-AI image "
+                    "detection on Community Forensics. Calibrated via "
+                    "temperature scaling at training time; light saturation "
+                    "guard at inference for OOD inputs."
+                ),
+                domain="ml",
+                p_ai=ai_prob,
+                confidence=confidence,
+                severity=_severity(ai_prob) if confidence > 0.35 else SignalSeverity.info,
+                evidence=evidence,
+                plain_language=plain,
+            )
+        )
+        # Keep the fallback residual map as a lightweight explanatory view.
+        try:
+            heat = _residual_heatmap(rgb)
+            overlay = overlay_heatmap(rgb, heat, alpha=0.45)
+            heatmaps.append(
+                HeatmapAsset(
+                    kind="gradcam",
+                    data_base64=encode_png_base64(overlay),
+                    description=(
+                        "High-frequency residual map (proxy view) shown with "
+                        "the custom classifier output."
+                    ),
+                )
+            )
+        except Exception as e:
+            log.debug("Heatmap generation failed (custom classifier path): %s", e)
+        return signals, heatmaps
+    except Exception as e:
+        log.warning("Custom checkpoint classifier unavailable; falling back: %s", e)
 
     pipes = _load_image_pipes()
     if not pipes:
@@ -479,21 +628,26 @@ def ml_image(pil: Image.Image, rgb: np.ndarray) -> Tuple[List[SignalResult], Lis
         if per_model:
             signals.append(_aggregate_models("ml_image", per_model, per_model_table))
 
-            # Heatmap: spatial high-frequency residual (proxy for what the
-            # classifiers attend to). Real GradCAM requires architecture
-            # introspection; this approximation gives the user useful
-            # spatial intuition.
+            # Prefer model-attribution saliency heatmap. If gradient-based
+            # attribution cannot run, fall back to residual-energy proxy.
             try:
-                heat = _residual_heatmap(rgb)
+                heat = _ml_attribution_heatmap(pil, pipes)
+                desc = (
+                    "Model-attribution saliency map: brighter regions had "
+                    "stronger influence on the AI-classifier verdict."
+                )
+                if heat is None:
+                    heat = _residual_heatmap(rgb)
+                    desc = (
+                        "High-frequency residual map (fallback): highlights "
+                        "texture regions correlated with detector confidence."
+                    )
                 overlay = overlay_heatmap(rgb, heat, alpha=0.45)
                 heatmaps.append(
                     HeatmapAsset(
                         kind="gradcam",
                         data_base64=encode_png_base64(overlay),
-                        description=(
-                            "High-frequency residual energy heatmap. "
-                            "Brighter regions tend to drive AI-detector verdicts."
-                        ),
+                        description=desc,
                     )
                 )
             except Exception as e:
@@ -548,17 +702,15 @@ def _clip_signal(pil: Image.Image) -> SignalResult:
             sim_real = float((feat @ state["real_proto"].T).squeeze().item())
             sim_ai = float((feat @ state["ai_proto"].T).squeeze().item())
 
-        # Convert similarities to probability with soft temperature.
-        # Empirically CLIP cosine margins between real/AI prototypes
-        # are small (typically ±0.02 — ±0.08). With slope 30 a margin
-        # of ±0.04 maps to ~0.77 / 0.23, which is in line with what
-        # the aggregate ML detectors produce.
+        # CLIP cosine margins between real/AI prototypes are small (~±0.02
+        # to ±0.08). Use moderate slope and clip the resulting probability
+        # so a single saturated CLIP score cannot dominate the verdict.
         margin = sim_ai - sim_real
-        p_ai = 1.0 / (1.0 + np.exp(-margin * 30.0))
-        p_ai = float(np.clip(p_ai, 0.05, 0.95))
-        # Confidence depends on margin magnitude — let it climb to 0.85
-        # so CLIP can pull its weight in the fusion.
-        margin_conf = float(np.clip(abs(margin) * 18.0, 0.1, 0.85))
+        p_ai = 1.0 / (1.0 + np.exp(-margin * 22.0))
+        p_ai = float(np.clip(p_ai, 0.20, 0.80))
+        # Confidence scales with margin magnitude; capped lower than before
+        # to leave room for physics + biological evidence.
+        margin_conf = float(np.clip(abs(margin) * 14.0, 0.1, 0.65))
         return SignalResult(
             id="ml_clip",
             layer=4,
@@ -661,7 +813,27 @@ def ml_audio(samples: np.ndarray, sr: int) -> SignalResult:
     try:
         if samples.ndim > 1:
             samples = samples.mean(axis=1)
-        preds = pipe({"array": samples.astype(np.float32), "sampling_rate": int(sr)})
+        target_sr = int(
+            getattr(getattr(pipe, "feature_extractor", None), "sampling_rate", 0) or sr
+        )
+        if target_sr <= 0:
+            target_sr = int(sr)
+        arr = samples.astype(np.float32)
+        if int(sr) != target_sr:
+            # Pre-resample ourselves so transformers pipeline doesn't require
+            # torchaudio for internal resampling on Windows setups.
+            try:
+                import librosa  # type: ignore
+
+                arr = librosa.resample(arr, orig_sr=int(sr), target_sr=target_sr).astype(np.float32)
+            except Exception:
+                from scipy.signal import resample_poly  # type: ignore
+
+                g = int(np.gcd(int(sr), target_sr))
+                up = target_sr // g
+                down = int(sr) // g
+                arr = resample_poly(arr, up, down).astype(np.float32)
+        preds = pipe({"array": arr, "sampling_rate": target_sr})
         p_ai, table = _interpret_predictions(preds)
         return SignalResult(
             id="ml_audio",
@@ -672,7 +844,11 @@ def ml_audio(samples: np.ndarray, sr: int) -> SignalResult:
             p_ai=float(p_ai),
             confidence=0.85,
             severity=_severity(p_ai),
-            evidence={"label_scores": table},
+            evidence={
+                "label_scores": table,
+                "input_sr": int(sr),
+                "model_sr": int(target_sr),
+            },
             plain_language=f"Audio AI classifier estimates p(AI) = {p_ai:.2f}.",
         )
     except Exception as e:
