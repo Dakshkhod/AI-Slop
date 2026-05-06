@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from . import __version__
 from .config import get_settings
 from .routes import analyze as analyze_routes
+from .routes import extension as extension_routes
 from .routes import health as health_routes
 
 
@@ -54,6 +55,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health_routes.router)
     app.include_router(analyze_routes.router)
+    app.include_router(extension_routes.router)
 
     @app.get("/")
     def root():
@@ -62,7 +64,7 @@ def create_app() -> FastAPI:
                 "name": settings.service_name,
                 "version": __version__,
                 "docs": "/docs",
-                "endpoints": ["/healthz", "/api/info", "/api/analyze", "/api/analyze-url"],
+                "endpoints": ["/healthz", "/api/info", "/api/analyze", "/api/analyze-url", "/api/check_hash", "/api/analyze_url", "/api/report_wrong"],
             }
         )
 
