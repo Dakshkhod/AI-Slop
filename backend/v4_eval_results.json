@@ -1,0 +1,17 @@
+{
+  "model": "best_model_v4.pth",
+  "temperature": 1.2692888975143433,
+  "val_images": 436,
+  "auc": 0.8262,
+  "accuracy": 0.7064,
+  "f1": 0.6145,
+  "ai_detection_rate": 0.4722,
+  "real_accuracy": 0.9364,
+  "false_positive_rate": 0.0636,
+  "confusion_matrix": {
+    "tn": 206,
+    "fp": 14,
+    "fn": 114,
+    "tp": 102
+  }
+}

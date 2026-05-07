@@ -1,8 +1,7 @@
 {
-  "temperature": 0.27215805649757385,
-  "ece_before": 0.0517234602455677,
-  "ece_after": 0.0005736790189394844,
-  "val_auc": 1.0,
-  "val_acc": 0.9994929006085193,
-  "n_calib_samples": 1972
+  "temperature": 1.2692888975143433,
+  "ece_before": 0.141893,
+  "ece_after": 0.123125,
+  "val_auc": 0.826199,
+  "model": "best_model_v4.pth"
 }
