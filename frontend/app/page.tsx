@@ -16,12 +16,19 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalyzeResponse | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  // Hold the original File so the FeedbackPanel can re-upload it as
+  // ground truth when the user submits a correction. Cleared on each
+  // new analysis. Null for URL-based analyses (those re-fetch by URL).
+  const [sourceFile, setSourceFile] = useState<File | null>(null);
+  const [sourceUrl, setSourceUrl] = useState<string>("");
 
   async function handleFile(file: File) {
     setBusy(true);
     setError(null);
     setResult(null);
     setPreviewUrl(null);
+    setSourceFile(file);
+    setSourceUrl("");
     try {
       if (file.type.startsWith("image/")) {
         setPreviewUrl(URL.createObjectURL(file));
@@ -40,6 +47,8 @@ export default function HomePage() {
     setError(null);
     setResult(null);
     setPreviewUrl(url);
+    setSourceFile(null);
+    setSourceUrl(url);
     try {
       const res = await analyzeUrl(url);
       setResult(res);
@@ -88,7 +97,7 @@ export default function HomePage() {
               <div className="space-y-6 lg:col-span-2">
                 <ProvenanceCard trail={result.provenance_trail ?? []} />
                 <DomainBreakdown data={result.domain_real_confidence} />
-                <FeedbackPanel result={result} />
+                <FeedbackPanel result={result} sourceFile={sourceFile} sourceUrl={sourceUrl} />
                 <ModelBlock versions={result.model_versions} />
                 <PrivacyBlock />
               </div>

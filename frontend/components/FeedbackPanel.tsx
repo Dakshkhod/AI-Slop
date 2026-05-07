@@ -5,6 +5,11 @@ import { AnalyzeResponse, reportWrong, sendFeedback } from "@/lib/api";
 
 type Props = {
   result: AnalyzeResponse;
+  /** Original uploaded File — sent as multipart so the retrain pipeline
+   *  has the actual image bytes. Null for URL-based analyses (the
+   *  backend re-fetches from image_url instead). */
+  sourceFile?: File | null;
+  sourceUrl?: string;
 };
 
 type Stage =
@@ -16,10 +21,11 @@ type Stage =
   | "already_reported"
   | "error";
 
-export default function FeedbackPanel({ result }: Props) {
+export default function FeedbackPanel({ result, sourceFile, sourceUrl }: Props) {
   const [stage, setStage] = useState<Stage>("idle");
   const [comment, setComment] = useState("");
   const [errMsg, setErrMsg] = useState("");
+  const [imageSaved, setImageSaved] = useState<boolean>(false);
 
   const systemVerdict = {
     verdict: result.verdict,
@@ -54,6 +60,8 @@ export default function FeedbackPanel({ result }: Props) {
       const res = await reportWrong({
         request_id: result.request_id,
         user_verdict: userVerdict,
+        file: sourceFile ?? null,
+        image_url: sourceUrl ?? "",
         filename: result.filename,
         file_size: result.bytes,
         system_verdict: systemVerdict,
@@ -63,6 +71,7 @@ export default function FeedbackPanel({ result }: Props) {
         setStage("already_reported");
         return;
       }
+      setImageSaved(!!res.image_saved);
       setStage("thanks_down");
     } catch (e) {
       setErrMsg(e instanceof Error ? e.message : "Failed to submit");
@@ -160,8 +169,9 @@ export default function FeedbackPanel({ result }: Props) {
             Saved as ground truth.
           </p>
           <p className="text-xs text-amber-200/80">
-            This image enters the hard-negative set for the next training
-            cycle.
+            {imageSaved
+              ? "Image bytes saved to backend/_data/feedback_images/. Will enter the next training cycle."
+              : "Correction logged, but the image bytes were not saved (no source file). Retraining will need a manual lookup."}
           </p>
         </div>
       )}

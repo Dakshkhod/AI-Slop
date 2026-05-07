@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, File, Form, Header, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
 from ..config import get_settings
@@ -226,25 +226,62 @@ async def analyze_image_url(body: AnalyzeUrlRequest) -> Dict[str, Any]:
     }
 
 
+_ALLOWED_IMG_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tiff", ".heic"}
+
+
+def _safe_ext(filename: str, fallback: str = ".jpg") -> str:
+    """Return a safe lowercase extension for the saved image, or fallback."""
+    if not filename:
+        return fallback
+    p = Path(filename).suffix.lower()
+    return p if p in _ALLOWED_IMG_EXT else fallback
+
+
 @router.post("/report_wrong")
-async def report_wrong(body: ReportWrongRequest, request: Request) -> Dict[str, Any]:
-    """Append a 'this verdict was wrong' correction to hard_negatives.jsonl.
+async def report_wrong(
+    request: Request,
+    user_verdict: str = Form(...),
+    phash: str = Form(""),
+    image_url: str = Form(""),
+    filename: str = Form(""),
+    file_size: int = Form(0),
+    request_id: str = Form(""),
+    comment: str = Form(""),
+    system_verdict: str = Form("{}"),    # JSON-encoded dict
+    file: Optional[UploadFile] = File(None),
+) -> Dict[str, Any]:
+    """Append a 'this verdict was wrong' correction to hard_negatives.jsonl
+    AND save the image bytes to backend/_data/feedback_images/ so the
+    retrain pipeline has actual pixels to learn from.
+
+    Multipart form (so the original image can ride along):
+      - file:           the image bytes (recommended; required for retrain)
+      - user_verdict:   'real' or 'ai'
+      - phash, image_url, filename, file_size, request_id, comment,
+        system_verdict (JSON string)
 
     TESTING-PHASE BEHAVIOUR: every correction is treated as ground truth
-    and auto-promoted to status='verified', with an admin_verified marker
-    written in the same operation so the retrain pipeline consumes it
-    directly. The consensus / public-review machinery still exists in the
-    codebase (see admin endpoints) and can be re-enabled by reverting this
-    function once the system is opened to public users.
+    and auto-promoted to status='verified'. Re-enable consensus / admin
+    gating by reverting this function when opening to public users.
     """
+    if user_verdict not in ("real", "ai"):
+        raise HTTPException(status_code=400, detail="user_verdict must be 'real' or 'ai'")
+
+    try:
+        sys_verdict_obj = json.loads(system_verdict) if system_verdict else {}
+    except Exception:
+        sys_verdict_obj = {}
+
     settings = get_settings()
     reports_path = settings.data_dir / "hard_negatives.jsonl"
+    images_dir = settings.data_dir / "feedback_images"
     reports_path.parent.mkdir(parents=True, exist_ok=True)
+    images_dir.mkdir(parents=True, exist_ok=True)
     reporter = _hash_reporter(request)
 
     # Dedup: same (phash, user_verdict) from same reporter — return
     # already_reported so the UI can show a clean "already saved" state.
-    if body.phash:
+    if phash:
         try:
             with open(reports_path, "r", encoding="utf-8") as f:
                 for line in f:
@@ -253,38 +290,81 @@ async def report_wrong(body: ReportWrongRequest, request: Request) -> Dict[str, 
                     except Exception:
                         continue
                     if (obj.get("type") == "report_wrong"
-                            and obj.get("phash") == body.phash
+                            and obj.get("phash") == phash
                             and obj.get("reporter") == reporter
-                            and obj.get("user_verdict") == body.user_verdict):
+                            and obj.get("user_verdict") == user_verdict):
                         return {
                             "status": "already_reported",
-                            "phash": body.phash,
+                            "phash": phash,
                             "message": "Already saved.",
                         }
         except FileNotFoundError:
             pass
 
+    # Save the image bytes if provided. Filename: <user_verdict>/<phash>.<ext>
+    # so retraining can scoop a folder per class. Falls back to UUID if no
+    # phash. We also try to fetch image_url server-side if no file uploaded.
+    saved_image_path: Optional[str] = None
+    image_bytes: Optional[bytes] = None
+    if file is not None:
+        try:
+            image_bytes = await file.read()
+            if not image_bytes:
+                image_bytes = None
+        except Exception as exc:
+            log.warning("Could not read uploaded feedback image: %s", exc)
+            image_bytes = None
+    elif image_url:
+        try:
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+                resp = await client.get(image_url)
+                if resp.status_code == 200 and resp.content:
+                    image_bytes = resp.content
+        except Exception as exc:
+            log.warning("Could not fetch feedback image_url: %s", exc)
+
+    if image_bytes:
+        # Refuse anything implausibly large (>50MB) — same cap as analyze
+        if len(image_bytes) > 50 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Feedback image too large (max 50MB)")
+        ext = _safe_ext(filename, fallback=_safe_ext((file.filename if file else "") or "", ".jpg"))
+        # Compute a content hash so we never overwrite a different image
+        # that happens to share the same phash.
+        content_hash = hashlib.sha256(image_bytes).hexdigest()[:16]
+        stem = phash or content_hash
+        class_dir = images_dir / user_verdict
+        class_dir.mkdir(parents=True, exist_ok=True)
+        out_path = class_dir / f"{stem}_{content_hash}{ext}"
+        try:
+            with open(out_path, "wb") as f:
+                f.write(image_bytes)
+            saved_image_path = str(out_path.relative_to(settings.data_dir))
+        except Exception as exc:
+            log.error("Could not save feedback image: %s", exc)
+
     now = datetime.now(timezone.utc).isoformat()
     entry = {
         "type": "report_wrong",
         "status": "verified",
-        "phash": body.phash,
-        "image_url": body.image_url,
-        "filename": body.filename,
-        "file_size": body.file_size,
-        "user_verdict": body.user_verdict,
-        "system_verdict": body.system_verdict,
-        "comment": body.comment[:500] if body.comment else "",
-        "request_id": body.request_id,
+        "phash": phash,
+        "image_url": image_url,
+        "filename": filename,
+        "file_size": file_size or (len(image_bytes) if image_bytes else 0),
+        "user_verdict": user_verdict,
+        "system_verdict": sys_verdict_obj,
+        "comment": comment[:500] if comment else "",
+        "request_id": request_id,
         "reporter": reporter,
+        "image_path": saved_image_path,    # relative to data_dir; None if image not stored
         "reported_at": now,
     }
     marker = {
         "type": "admin_verified",
         "status": "verified",
-        "phash": body.phash,
-        "user_verdict": body.user_verdict,
-        "note": (body.comment or "")[:500] or "Verified via UI feedback",
+        "phash": phash,
+        "user_verdict": user_verdict,
+        "image_path": saved_image_path,
+        "note": (comment or "")[:500] or "Verified via UI feedback",
         "verified_at": now,
     }
 
@@ -298,6 +378,8 @@ async def report_wrong(body: ReportWrongRequest, request: Request) -> Dict[str, 
 
     return {
         "status": "verified",
+        "image_saved": saved_image_path is not None,
+        "image_path": saved_image_path,
         "message": "Saved — will enter the next training cycle.",
     }
 

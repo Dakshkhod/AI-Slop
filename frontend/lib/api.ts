@@ -100,6 +100,10 @@ export type FeedbackPayload = {
 export type ReportWrongPayload = {
   request_id: string;
   user_verdict: "real" | "ai";
+  /** REQUIRED for retraining — the actual image bytes. The endpoint
+   *  also accepts an image_url and will re-fetch server-side as a
+   *  fallback, but file is preferred (works offline, no CDN drift). */
+  file?: File | null;
   phash?: string;
   image_url?: string;
   filename?: string;
@@ -128,14 +132,27 @@ export async function sendFeedback(p: FeedbackPayload): Promise<{ status: string
 export type ReportWrongResponse = {
   status: string;
   message?: string;
+  image_saved?: boolean;
+  image_path?: string | null;
 };
 
 export async function reportWrong(p: ReportWrongPayload): Promise<ReportWrongResponse> {
-  const r = await fetch("/api/report_wrong", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ phash: "", ...p }),
-  });
+  // Multipart so the original File rides along with the metadata. The
+  // backend saves it to backend/_data/feedback_images/<verdict>/ for the
+  // next training cycle.
+  const fd = new FormData();
+  fd.append("user_verdict", p.user_verdict);
+  fd.append("request_id", p.request_id);
+  fd.append("phash", p.phash ?? "");
+  fd.append("image_url", p.image_url ?? "");
+  fd.append("filename", p.filename ?? "");
+  fd.append("file_size", String(p.file_size ?? 0));
+  fd.append("comment", p.comment ?? "");
+  fd.append("system_verdict", JSON.stringify(p.system_verdict ?? {}));
+  if (p.file) {
+    fd.append("file", p.file, p.filename || p.file.name || "image");
+  }
+  const r = await fetch("/api/report_wrong", { method: "POST", body: fd });
   if (!r.ok) throw new Error(`report_wrong failed (${r.status})`);
   return r.json();
 }
