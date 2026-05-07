@@ -515,7 +515,7 @@ def ml_image(pil: Image.Image, rgb: np.ndarray) -> Tuple[List[SignalResult], Lis
     signals: List[SignalResult] = []
     heatmaps: List[HeatmapAsset] = []
 
-    # Primary path: local TruthLens checkpoint classifier (v3 = ConvNeXt-base 384).
+    # Primary path: local TruthLens checkpoint classifier (v4 = EfficientNet-B4 224).
     try:
         from .detector import check_ml_classifier
 
@@ -524,9 +524,8 @@ def ml_image(pil: Image.Image, rgb: np.ndarray) -> Tuple[List[SignalResult], Lis
         real_prob_raw = float(out["detail"]["real_probability"])
         backbone = str(out["detail"].get("backbone", "unknown"))
         img_size = int(out["detail"].get("img_size", 0) or 0)
-        # The v3 checkpoint already had its temperature fitted on a held-out
-        # set (see `T.json` → ECE drops from ~0.05 to ~0.0006), and is much
-        # better calibrated than v2. Keep only a light saturation guard for
+        # The v4 checkpoint has its temperature fitted on a held-out val set
+        # (T=1.2693, see T.json). Keep only a light saturation guard for
         # out-of-distribution web inputs; do NOT double-temperature-scale.
         ai_prob = float(np.clip(ai_prob_raw, 0.02, 0.98))
         is_saturated = ai_prob_raw >= 0.98 or ai_prob_raw <= 0.02
@@ -539,7 +538,7 @@ def ml_image(pil: Image.Image, rgb: np.ndarray) -> Tuple[List[SignalResult], Lis
             confidence = float(np.clip(0.55 + margin * 0.9, 0.55, 0.92))
         real_prob = 1.0 - ai_prob
         plain = (
-            f"Custom classifier (v3, {backbone} @ {img_size}px) "
+            f"Custom classifier (v4, {backbone} @ {img_size}px) "
             f"calibrated p(AI)={ai_prob:.2f} (raw {ai_prob_raw:.2f})"
             + (", saturated → confidence reduced" if is_saturated else "")
             + "."
@@ -557,13 +556,13 @@ def ml_image(pil: Image.Image, rgb: np.ndarray) -> Tuple[List[SignalResult], Lis
             SignalResult(
                 id="ml_image",
                 layer=4,
-                name=f"Custom {backbone} classifier (v3)",
+                name=f"Custom {backbone} classifier (v4)",
                 description=(
-                    "Local checkpoint classifier (`best_model_v3.pth`, "
-                    "ConvNeXt-base 384) trained for real-vs-AI image "
-                    "detection on Community Forensics. Calibrated via "
-                    "temperature scaling at training time; light saturation "
-                    "guard at inference for OOD inputs."
+                    "Local checkpoint classifier (`best_model_v4.pth`, "
+                    "EfficientNet-B4 224px) fine-tuned on real photos + "
+                    "AI-generated images. Temperature-scaled (T=1.2693) "
+                    "for calibration; light saturation guard at inference "
+                    "for OOD inputs. Val AUC=0.826, FPR=6.4%."
                 ),
                 domain="ml",
                 p_ai=ai_prob,
