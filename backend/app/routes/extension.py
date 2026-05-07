@@ -227,34 +227,23 @@ async def analyze_image_url(body: AnalyzeUrlRequest) -> Dict[str, Any]:
 
 
 @router.post("/report_wrong")
-async def report_wrong(
-    body: ReportWrongRequest,
-    request: Request,
-    authorization: Optional[str] = Header(default=None),
-) -> Dict[str, Any]:
-    """Append a 'this verdict was wrong' report to the review queue.
+async def report_wrong(body: ReportWrongRequest, request: Request) -> Dict[str, Any]:
+    """Append a 'this verdict was wrong' correction to hard_negatives.jsonl.
 
-    NOTE: Reports do NOT change predictions. They land in
-    hard_negatives.jsonl with status='reported' and require either
-    (a) consensus of N independent reporters agreeing on the same
-    correction for the same phash, or (b) explicit admin verification
-    via /api/admin/verify. Only verified entries enter the training set.
-
-    If the request carries a valid Bearer admin token in the
-    Authorization header, the report is treated as ground truth and
-    is auto-promoted to status='verified' (no consensus needed). An
-    admin_verified marker is also appended in the same write so the
-    retrain pipeline picks it up directly.
+    TESTING-PHASE BEHAVIOUR: every correction is treated as ground truth
+    and auto-promoted to status='verified', with an admin_verified marker
+    written in the same operation so the retrain pipeline consumes it
+    directly. The consensus / public-review machinery still exists in the
+    codebase (see admin endpoints) and can be re-enabled by reverting this
+    function once the system is opened to public users.
     """
     settings = get_settings()
     reports_path = settings.data_dir / "hard_negatives.jsonl"
     reports_path.parent.mkdir(parents=True, exist_ok=True)
     reporter = _hash_reporter(request)
-    is_admin = _is_admin(authorization)
 
-    # Per-reporter de-dup: same reporter for same phash can only have
-    # one active report (re-reporting overwrites timestamp but doesn't
-    # add to consensus count).
+    # Dedup: same (phash, user_verdict) from same reporter — return
+    # already_reported so the UI can show a clean "already saved" state.
     if body.phash:
         try:
             with open(reports_path, "r", encoding="utf-8") as f:
@@ -270,14 +259,15 @@ async def report_wrong(
                         return {
                             "status": "already_reported",
                             "phash": body.phash,
-                            "message": "You've already reported this image with the same correction.",
+                            "message": "Already saved.",
                         }
         except FileNotFoundError:
             pass
 
+    now = datetime.now(timezone.utc).isoformat()
     entry = {
         "type": "report_wrong",
-        "status": "verified" if is_admin else "reported",
+        "status": "verified",
         "phash": body.phash,
         "image_url": body.image_url,
         "filename": body.filename,
@@ -286,65 +276,29 @@ async def report_wrong(
         "system_verdict": body.system_verdict,
         "comment": body.comment[:500] if body.comment else "",
         "request_id": body.request_id,
-        "reporter": reporter,   # opaque hash, NOT raw IP
-        "is_admin": is_admin,
-        "reported_at": datetime.now(timezone.utc).isoformat(),
+        "reporter": reporter,
+        "reported_at": now,
+    }
+    marker = {
+        "type": "admin_verified",
+        "status": "verified",
+        "phash": body.phash,
+        "user_verdict": body.user_verdict,
+        "note": (body.comment or "")[:500] or "Verified via UI feedback",
+        "verified_at": now,
     }
 
     try:
         with open(reports_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
-            if is_admin:
-                # Also write a canonical admin_verified marker so the
-                # retrain pipeline finds this label without scanning all
-                # report_wrong entries. Mirrors /api/admin/verify behavior.
-                marker = {
-                    "type": "admin_verified",
-                    "status": "verified",
-                    "phash": body.phash,
-                    "user_verdict": body.user_verdict,
-                    "note": (body.comment or "")[:500] or "Verified inline by admin via UI",
-                    "verified_at": datetime.now(timezone.utc).isoformat(),
-                }
-                f.write(json.dumps(marker) + "\n")
+            f.write(json.dumps(marker) + "\n")
     except Exception as exc:
         log.error("Failed to write report: %s", exc)
         raise HTTPException(status_code=500, detail="Could not save report")
 
-    # Admin reports skip the consensus tally — they're already verified.
-    if is_admin:
-        return {
-            "status": "verified",
-            "review_status": "verified",
-            "agree_count": 1,
-            "needed_for_consensus": 0,
-            "message": "Verified by maintainer — will enter the next training cycle.",
-        }
-
-    # Count independent reporters agreeing on this correction.
-    agree_count = 0
-    if body.phash:
-        seen = set()
-        try:
-            with open(reports_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    try:
-                        obj = json.loads(line)
-                    except Exception:
-                        continue
-                    if (obj.get("type") == "report_wrong"
-                            and obj.get("phash") == body.phash
-                            and obj.get("user_verdict") == body.user_verdict):
-                        seen.add(obj.get("reporter", ""))
-            agree_count = len(seen)
-        except FileNotFoundError:
-            pass
-
     return {
-        "status": "recorded",
-        "review_status": "consensus" if agree_count >= 3 else "reported",
-        "agree_count": agree_count,
-        "needed_for_consensus": max(0, 3 - agree_count),
+        "status": "verified",
+        "message": "Saved — will enter the next training cycle.",
     }
 
 

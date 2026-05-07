@@ -115,42 +115,10 @@ export type FeedbackStats = {
   feedback_down: number;
 };
 
-// Admin token is stored in localStorage under this key. When set, all
-// feedback calls send Authorization: Bearer <token> so the maintainer's
-// own corrections are auto-promoted to status='verified'.
-const ADMIN_TOKEN_KEY = "truthlens.adminToken";
-
-export function getAdminToken(): string {
-  if (typeof window === "undefined") return "";
-  return window.localStorage.getItem(ADMIN_TOKEN_KEY) || "";
-}
-
-export function setAdminToken(token: string): void {
-  if (typeof window === "undefined") return;
-  if (token) window.localStorage.setItem(ADMIN_TOKEN_KEY, token);
-  else window.localStorage.removeItem(ADMIN_TOKEN_KEY);
-}
-
-function authHeaders(): Record<string, string> {
-  const t = getAdminToken();
-  return t ? { Authorization: `Bearer ${t}` } : {};
-}
-
-export async function checkAdminToken(): Promise<boolean> {
-  try {
-    const r = await fetch("/api/admin/check", { headers: authHeaders() });
-    if (!r.ok) return false;
-    const j = (await r.json()) as { ok: boolean };
-    return !!j.ok;
-  } catch {
-    return false;
-  }
-}
-
 export async function sendFeedback(p: FeedbackPayload): Promise<{ status: string; rating: string }> {
   const r = await fetch("/api/feedback", {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(p),
   });
   if (!r.ok) throw new Error(`feedback failed (${r.status})`);
@@ -159,16 +127,13 @@ export async function sendFeedback(p: FeedbackPayload): Promise<{ status: string
 
 export type ReportWrongResponse = {
   status: string;
-  review_status?: "reported" | "consensus" | "verified";
-  agree_count?: number;
-  needed_for_consensus?: number;
   message?: string;
 };
 
 export async function reportWrong(p: ReportWrongPayload): Promise<ReportWrongResponse> {
   const r = await fetch("/api/report_wrong", {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ phash: "", ...p }),
   });
   if (!r.ok) throw new Error(`report_wrong failed (${r.status})`);
