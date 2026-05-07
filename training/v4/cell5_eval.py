@@ -33,7 +33,8 @@ class TruthLensModel(nn.Module):
         return self.head(self.backbone(x))
 
 # ── Load checkpoint + temperature ────────────────────────────────────────────
-torch.serialization.add_safe_globals([np.core.multiarray.scalar])
+import pathlib
+torch.serialization.add_safe_globals([np.core.multiarray.scalar, pathlib.PosixPath, pathlib.WindowsPath])
 ckpt = torch.load(CKPT_PATH, map_location="cpu", weights_only=True)
 cfg  = ckpt.get("config", {})
 backbone_name = cfg.get("model", "efficientnet_b4")
