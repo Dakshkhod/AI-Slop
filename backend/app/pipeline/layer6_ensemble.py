@@ -203,6 +203,33 @@ def try_xgb(signals: List[SignalResult]) -> float | None:
 _ML_IDS = {"ml_image", "ml_clip", "ml_face", "ml_audio"}
 
 
+def _has_strong_real_provenance(signals: List[SignalResult] | None) -> bool:
+    """True when provenance signals near-conclusively indicate a real photo.
+
+    Triggers on:
+      • Full camera EXIF (exif_coherence p_ai ≤ 0.25, i.e. ≥6 sensor fields
+        present — Make, Model, ExposureTime, ISO, FNumber, LensModel, …)
+      • Verified C2PA / Content Credentials (c2pa_presence p_ai ≤ 0.10)
+    Used to block the ML override on the headline score and verdict so a
+    v4 model false-positive cannot mislabel a photo with proof-of-camera.
+    """
+    if not signals:
+        return False
+    for s in signals:
+        if s.error or s.confidence < 0.6:
+            continue
+        if s.id == "exif_coherence" and s.p_ai <= 0.25:
+            fields = s.evidence.get("fields", {}) if isinstance(s.evidence, dict) else {}
+            # Require at least one core camera tag (make/model) actually
+            # present — guards against a malformed EXIF block that just
+            # happens to count fields.
+            if any(k in fields for k in ("make", "camera_model", "image_make", "image_model")):
+                return True
+        if s.id == "c2pa_presence" and s.p_ai <= 0.10:
+            return True
+    return False
+
+
 def _ml_consensus(
     signals: List[SignalResult] | None,
 ) -> Tuple[float | None, float, int]:
@@ -239,14 +266,21 @@ def label_for(
     # can decide whether to commit or back off.
     # ----------------------------------------------------------------
     ml_p, ml_c, ml_n = _ml_consensus(signals)
-    ml_says_ai = ml_p is not None and ml_p >= 0.50 and ml_c >= 0.35
+    ml_says_ai = ml_p is not None and ml_p >= 0.55 and ml_c >= 0.35
     ml_says_real = ml_p is not None and ml_p <= 0.40 and ml_c >= 0.35
-    # Strong-AI threshold lowered from 0.65 → 0.58. The v4 EfficientNet-B4
-    # ML signal is well-calibrated (T=1.27, ECE≈0) — when it crosses 0.58
-    # AI it is genuinely confident, and we must not let broken biological /
-    # semantic heuristics drag the verdict back to "real".
-    ml_strong_ai = ml_p is not None and ml_p >= 0.58 and ml_c >= 0.5
+    # Strong-AI threshold raised back to 0.65 because the v4 model has a
+    # measured FPR of ~12% at threshold 0.35 — at ml_p in the 0.55-0.65
+    # band the model is genuinely uncertain and should not override
+    # corroborating real-photo evidence.
+    ml_strong_ai = ml_p is not None and ml_p >= 0.65 and ml_c >= 0.5
     ml_strong_real = ml_p is not None and ml_p <= 0.35 and ml_c >= 0.5
+
+    # Real photos with full camera EXIF (or verified C2PA) get protection
+    # from ML false-positives — these are near-ground-truth real signals.
+    has_real_provenance = _has_strong_real_provenance(signals)
+    if has_real_provenance:
+        ml_strong_ai = False
+        ml_says_ai = False
 
     # Provenance / non-ML "smoking guns" — only consulted when ML is
     # weak. We exclude ML and exif_coherence (which flags every
@@ -404,16 +438,23 @@ def fuse_full(signals: List[SignalResult]) -> Dict:
         p_ai = 0.5 * p_ai + 0.5 * float(p_xgb)
 
     # ML override on the headline number: when the trained ML model is
-    # confident and disagrees with the fused score, blend the fused p_ai
-    # toward the ML consensus. Without this, the headline 0..100 score
-    # visually contradicts the verdict label ("Likely AI" with score 52)
-    # because broken biological/semantic heuristics drag the fusion to
-    # the boundary even after their trust weights are reduced.
+    # confident and disagrees with the fused score, pull the fused p_ai
+    # toward the ML consensus so the displayed score matches the verdict
+    # label. The override is GATED in two ways:
+    #   1. Strong real provenance (full camera EXIF or verified C2PA)
+    #      blocks the AI-direction override entirely — the model's
+    #      false-positive rate (~12%) cannot be allowed to override
+    #      proof-of-camera.
+    #   2. Threshold raised to 0.65 (was 0.58) so only confident model
+    #      verdicts move the score, not borderline 0.55-0.65 calls.
     ml_p, ml_c, _ml_n = _ml_consensus(signals)
+    has_real_prov = _has_strong_real_provenance(signals)
     if ml_p is not None and ml_c >= 0.5:
-        if ml_p >= 0.58 and p_ai < ml_p:
-            # Strong-AI: blend 70% ML + 30% fused, floor at 0.60.
-            p_ai = max(0.60, 0.70 * ml_p + 0.30 * p_ai)
+        if ml_p >= 0.65 and p_ai < ml_p and not has_real_prov:
+            # Strong-AI: blend 60% ML + 40% fused, floor at 0.58.
+            # Lighter blend than before so an isolated ML FP cannot
+            # single-handedly flip a photo where most signals say real.
+            p_ai = max(0.58, 0.60 * ml_p + 0.40 * p_ai)
         elif ml_p <= 0.35 and p_ai > ml_p:
             # Strong-real: blend 70% ML + 30% fused, ceil at 0.40.
             p_ai = min(0.40, 0.70 * ml_p + 0.30 * p_ai)
