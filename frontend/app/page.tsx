@@ -1,6 +1,7 @@
 "use client";
 
 import { DomainBreakdown } from "@/components/DomainBreakdown";
+import FeedbackPanel from "@/components/FeedbackPanel";
 import { ForensicTrail } from "@/components/ForensicTrail";
 import { HeatmapView } from "@/components/HeatmapView";
 import { ProvenanceCard } from "@/components/ProvenanceCard";
@@ -87,6 +88,7 @@ export default function HomePage() {
               <div className="space-y-6 lg:col-span-2">
                 <ProvenanceCard trail={result.provenance_trail ?? []} />
                 <DomainBreakdown data={result.domain_real_confidence} />
+                <FeedbackPanel result={result} />
                 <ModelBlock versions={result.model_versions} />
                 <PrivacyBlock />
               </div>

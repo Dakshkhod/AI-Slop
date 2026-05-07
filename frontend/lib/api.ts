@@ -83,3 +83,62 @@ export async function analyzeUrl(url: string): Promise<AnalyzeResponse> {
   }
   return (await r.json()) as AnalyzeResponse;
 }
+
+// ─── Feedback ──────────────────────────────────────────────────────────────
+
+export type FeedbackRating = "up" | "down";
+
+export type FeedbackPayload = {
+  request_id: string;
+  rating: FeedbackRating;
+  phash?: string;
+  image_url?: string;
+  system_verdict?: Record<string, unknown>;
+  comment?: string;
+};
+
+export type ReportWrongPayload = {
+  request_id: string;
+  user_verdict: "real" | "ai";
+  phash?: string;
+  image_url?: string;
+  filename?: string;
+  file_size?: number;
+  system_verdict?: Record<string, unknown>;
+  comment?: string;
+};
+
+export type FeedbackStats = {
+  total: number;
+  report_wrong: number;
+  feedback_up: number;
+  feedback_down: number;
+};
+
+export async function sendFeedback(p: FeedbackPayload): Promise<{ status: string; rating: string }> {
+  const r = await fetch("/api/feedback", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(p),
+  });
+  if (!r.ok) throw new Error(`feedback failed (${r.status})`);
+  return r.json();
+}
+
+export async function reportWrong(
+  p: ReportWrongPayload,
+): Promise<{ status: string; total_reports: number }> {
+  const r = await fetch("/api/report_wrong", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ phash: "", ...p }),
+  });
+  if (!r.ok) throw new Error(`report_wrong failed (${r.status})`);
+  return r.json();
+}
+
+export async function feedbackStats(): Promise<FeedbackStats> {
+  const r = await fetch("/api/feedback/stats");
+  if (!r.ok) throw new Error(`feedback_stats failed (${r.status})`);
+  return r.json();
+}

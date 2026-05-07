@@ -45,9 +45,28 @@ class AnalyzeUrlRequest(BaseModel):
 
 class ReportWrongRequest(BaseModel):
     phash: str
-    image_url: str
-    user_verdict: str          # "real" or "ai"
+    image_url: str = ""
+    user_verdict: str          # "real" or "ai" — what the user says it actually is
     system_verdict: Dict[str, Any] = {}
+    comment: str = ""          # optional free-text reason
+    filename: str = ""
+    file_size: int = 0
+    request_id: str = ""       # links the feedback to the original analyze request
+
+
+class FeedbackRequest(BaseModel):
+    """Generic feedback: thumbs-up/down on the verdict.
+
+    For thumbs-down, prefer /report_wrong which captures the corrected
+    label. This endpoint is for confirming the system was right (thumbs-up)
+    or for low-friction "I disagree" without specifying the correct label.
+    """
+    request_id: str
+    phash: str = ""
+    image_url: str = ""
+    rating: str                # "up" (correct) or "down" (wrong)
+    system_verdict: Dict[str, Any] = {}
+    comment: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -170,21 +189,27 @@ async def analyze_image_url(body: AnalyzeUrlRequest) -> Dict[str, Any]:
 
 
 @router.post("/report_wrong")
-async def report_wrong(body: ReportWrongRequest) -> Dict[str, str]:
+async def report_wrong(body: ReportWrongRequest) -> Dict[str, Any]:
     """Log a wrong-verdict report to hard_negatives.jsonl.
 
-    Reports are stored locally; the flywheel (Priority 3) reads them for
-    retraining. No user data is stored beyond the image hash and URL.
+    Reports are stored locally; the flywheel reads them for the next
+    retraining cycle. No PII is stored beyond what the user pastes into
+    the comment field.
     """
     settings = get_settings()
     reports_path = settings.data_dir / "hard_negatives.jsonl"
     reports_path.parent.mkdir(parents=True, exist_ok=True)
 
     entry = {
+        "type": "report_wrong",
         "phash": body.phash,
         "image_url": body.image_url,
+        "filename": body.filename,
+        "file_size": body.file_size,
         "user_verdict": body.user_verdict,
         "system_verdict": body.system_verdict,
+        "comment": body.comment,
+        "request_id": body.request_id,
         "reported_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -195,4 +220,73 @@ async def report_wrong(body: ReportWrongRequest) -> Dict[str, str]:
         log.error("Failed to write report: %s", exc)
         raise HTTPException(status_code=500, detail="Could not save report")
 
-    return {"status": "recorded"}
+    # Count total reports for transparency in UI ("847 corrections so far")
+    total = 0
+    try:
+        with open(reports_path, "r", encoding="utf-8") as f:
+            total = sum(1 for _ in f)
+    except Exception:
+        pass
+
+    return {"status": "recorded", "total_reports": total}
+
+
+@router.post("/feedback")
+async def feedback(body: FeedbackRequest) -> Dict[str, Any]:
+    """Log a thumbs-up/down rating on a verdict.
+
+    Stored alongside hard-negatives in the same JSONL so a single retrain
+    pipeline can consume all human signal. Thumbs-up entries are kept as
+    high-confidence labels (system was right); thumbs-down without a
+    correction goes into a 'review' queue.
+    """
+    if body.rating not in ("up", "down"):
+        raise HTTPException(status_code=400, detail="rating must be 'up' or 'down'")
+
+    settings = get_settings()
+    reports_path = settings.data_dir / "hard_negatives.jsonl"
+    reports_path.parent.mkdir(parents=True, exist_ok=True)
+
+    entry = {
+        "type": f"feedback_{body.rating}",
+        "rating": body.rating,
+        "request_id": body.request_id,
+        "phash": body.phash,
+        "image_url": body.image_url,
+        "system_verdict": body.system_verdict,
+        "comment": body.comment,
+        "reported_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    try:
+        with open(reports_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception as exc:
+        log.error("Failed to write feedback: %s", exc)
+        raise HTTPException(status_code=500, detail="Could not save feedback")
+
+    return {"status": "recorded", "rating": body.rating}
+
+
+@router.get("/feedback/stats")
+async def feedback_stats() -> Dict[str, Any]:
+    """Aggregate counts of feedback entries — for transparency in UI."""
+    settings = get_settings()
+    reports_path = settings.data_dir / "hard_negatives.jsonl"
+    counts = {"total": 0, "report_wrong": 0, "feedback_up": 0, "feedback_down": 0}
+    if not reports_path.exists():
+        return counts
+    try:
+        with open(reports_path, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                counts["total"] += 1
+                t = obj.get("type", "report_wrong")
+                if t in counts:
+                    counts[t] += 1
+    except Exception as exc:
+        log.warning("feedback_stats read failed: %s", exc)
+    return counts
