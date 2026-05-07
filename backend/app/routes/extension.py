@@ -56,6 +56,17 @@ def _check_admin(token: Optional[str]) -> None:
         raise HTTPException(status_code=401, detail="Invalid admin token")
 
 
+def _is_admin(token: Optional[str]) -> bool:
+    """Non-throwing version of _check_admin — returns True if the bearer
+    token matches TRUTHLENS_ADMIN_TOKEN. Used to optionally elevate trust
+    on regular feedback endpoints when the maintainer is signed in.
+    """
+    expected = os.getenv("TRUTHLENS_ADMIN_TOKEN", "").strip()
+    if not expected or not token or not token.startswith("Bearer "):
+        return False
+    return token[7:].strip() == expected
+
+
 # ---------------------------------------------------------------------------
 # Request / response models
 # ---------------------------------------------------------------------------
@@ -216,7 +227,11 @@ async def analyze_image_url(body: AnalyzeUrlRequest) -> Dict[str, Any]:
 
 
 @router.post("/report_wrong")
-async def report_wrong(body: ReportWrongRequest, request: Request) -> Dict[str, Any]:
+async def report_wrong(
+    body: ReportWrongRequest,
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
     """Append a 'this verdict was wrong' report to the review queue.
 
     NOTE: Reports do NOT change predictions. They land in
@@ -224,11 +239,18 @@ async def report_wrong(body: ReportWrongRequest, request: Request) -> Dict[str, 
     (a) consensus of N independent reporters agreeing on the same
     correction for the same phash, or (b) explicit admin verification
     via /api/admin/verify. Only verified entries enter the training set.
+
+    If the request carries a valid Bearer admin token in the
+    Authorization header, the report is treated as ground truth and
+    is auto-promoted to status='verified' (no consensus needed). An
+    admin_verified marker is also appended in the same write so the
+    retrain pipeline picks it up directly.
     """
     settings = get_settings()
     reports_path = settings.data_dir / "hard_negatives.jsonl"
     reports_path.parent.mkdir(parents=True, exist_ok=True)
     reporter = _hash_reporter(request)
+    is_admin = _is_admin(authorization)
 
     # Per-reporter de-dup: same reporter for same phash can only have
     # one active report (re-reporting overwrites timestamp but doesn't
@@ -255,7 +277,7 @@ async def report_wrong(body: ReportWrongRequest, request: Request) -> Dict[str, 
 
     entry = {
         "type": "report_wrong",
-        "status": "reported",   # → "consensus" → "verified"
+        "status": "verified" if is_admin else "reported",
         "phash": body.phash,
         "image_url": body.image_url,
         "filename": body.filename,
@@ -265,15 +287,39 @@ async def report_wrong(body: ReportWrongRequest, request: Request) -> Dict[str, 
         "comment": body.comment[:500] if body.comment else "",
         "request_id": body.request_id,
         "reporter": reporter,   # opaque hash, NOT raw IP
+        "is_admin": is_admin,
         "reported_at": datetime.now(timezone.utc).isoformat(),
     }
 
     try:
         with open(reports_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
+            if is_admin:
+                # Also write a canonical admin_verified marker so the
+                # retrain pipeline finds this label without scanning all
+                # report_wrong entries. Mirrors /api/admin/verify behavior.
+                marker = {
+                    "type": "admin_verified",
+                    "status": "verified",
+                    "phash": body.phash,
+                    "user_verdict": body.user_verdict,
+                    "note": (body.comment or "")[:500] or "Verified inline by admin via UI",
+                    "verified_at": datetime.now(timezone.utc).isoformat(),
+                }
+                f.write(json.dumps(marker) + "\n")
     except Exception as exc:
         log.error("Failed to write report: %s", exc)
         raise HTTPException(status_code=500, detail="Could not save report")
+
+    # Admin reports skip the consensus tally — they're already verified.
+    if is_admin:
+        return {
+            "status": "verified",
+            "review_status": "verified",
+            "agree_count": 1,
+            "needed_for_consensus": 0,
+            "message": "Verified by maintainer — will enter the next training cycle.",
+        }
 
     # Count independent reporters agreeing on this correction.
     agree_count = 0
@@ -453,6 +499,21 @@ async def admin_review(
         })
     items.sort(key=lambda x: -x["agree_count"])
     return {"items": items, "total": len(items)}
+
+
+@router.get("/admin/check")
+async def admin_check(
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    """Lightweight check used by the frontend to confirm a saved admin
+    token is still valid. Returns {ok: bool}; never throws so the UI can
+    just disable admin features when it's false."""
+    expected = os.getenv("TRUTHLENS_ADMIN_TOKEN", "").strip()
+    if not expected:
+        return {"ok": False, "reason": "admin_disabled"}
+    ok = bool(authorization and authorization.startswith("Bearer ")
+              and authorization[7:].strip() == expected)
+    return {"ok": ok}
 
 
 class VerifyRequest(BaseModel):
