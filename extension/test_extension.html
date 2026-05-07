@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>TruthLens — Extension Test Page</title>
+  <style>
+    body {
+      font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+      background: #0d1027;
+      color: #e8eaf3;
+      padding: 32px;
+      max-width: 960px;
+      margin: 0 auto;
+    }
+    h1 { font-size: 20px; margin-bottom: 6px; }
+    p  { color: #9aa1c2; font-size: 13px; margin-bottom: 24px; }
+    h2 { font-size: 14px; margin: 24px 0 12px; color: #9aa1c2; text-transform: uppercase; letter-spacing: 0.12em; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 16px;
+    }
+    .card {
+      border-radius: 12px;
+      overflow: hidden;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    .card img {
+      width: 100%;
+      height: 200px;
+      object-fit: cover;
+      display: block;
+    }
+    .card .caption {
+      padding: 8px 10px;
+      font-size: 11px;
+      color: #9aa1c2;
+    }
+
+    /* Small images that should NOT get a badge (below 200x200 threshold) */
+    .tiny-row { display: flex; gap: 12px; align-items: flex-start; margin-top: 8px; }
+    .tiny-row img { width: 80px; height: 80px; border-radius: 8px; }
+
+    .note {
+      background: rgba(62, 197, 255, 0.08);
+      border: 1px solid rgba(62, 197, 255, 0.2);
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-size: 12px;
+      color: #9aa1c2;
+      margin-bottom: 24px;
+    }
+    code { background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 4px; color: #c8cce0; }
+  </style>
+</head>
+<body>
+  <h1>TruthLens — Extension Test Page</h1>
+  <p>Load the TruthLens extension in developer mode, then open this page. Badges should appear on every image larger than 200&times;200 px.</p>
+
+  <div class="note">
+    <strong>How to verify:</strong><br>
+    1. Make sure the backend is running at <code>http://127.0.0.1:8000</code><br>
+    2. Load the <code>extension/</code> folder as an unpacked extension in Chrome<br>
+    3. Open this file in Chrome (File &rarr; Open File, or drag to Chrome)<br>
+    4. Within a few seconds, coloured circular badges should appear on the large images below<br>
+    5. Hover a badge to see the verdict. Click it to see the detail panel.<br>
+    6. Click the extension toolbar icon to see per-tab stats.
+  </div>
+
+  <h2>Large images — badges expected</h2>
+  <div class="grid">
+    <!-- Real-looking stock images via Unsplash source (random, different seeds) -->
+    <div class="card">
+      <img src="https://picsum.photos/seed/real1/400/400" alt="sample photo 1" crossorigin="anonymous">
+      <div class="caption">Picsum (real photo sample)</div>
+    </div>
+    <div class="card">
+      <img src="https://picsum.photos/seed/real2/400/400" alt="sample photo 2" crossorigin="anonymous">
+      <div class="caption">Picsum (real photo sample)</div>
+    </div>
+    <div class="card">
+      <img src="https://picsum.photos/seed/real3/400/400" alt="sample photo 3" crossorigin="anonymous">
+      <div class="caption">Picsum (real photo sample)</div>
+    </div>
+    <div class="card">
+      <img src="https://picsum.photos/seed/real4/400/400" alt="sample photo 4" crossorigin="anonymous">
+      <div class="caption">Picsum (real photo sample)</div>
+    </div>
+  </div>
+
+  <h2>Small images — badges should NOT appear (below 200&times;200 threshold)</h2>
+  <div class="tiny-row">
+    <img src="https://picsum.photos/seed/tiny1/80/80" alt="tiny 1" width="80" height="80">
+    <img src="https://picsum.photos/seed/tiny2/80/80" alt="tiny 2" width="80" height="80">
+    <img src="https://picsum.photos/seed/tiny3/80/80" alt="tiny 3" width="80" height="80">
+  </div>
+  <p style="margin-top:8px;">If badges appear on the small images above, the size threshold check is broken.</p>
+
+  <h2>Right-click test</h2>
+  <p>Right-click the image below and choose <em>TruthLens — analyse this image</em>. A forensic overlay should appear with the full signal breakdown.</p>
+  <img src="https://picsum.photos/seed/rightclick/600/400" alt="right-click test image"
+       style="max-width:100%; border-radius:12px;" crossorigin="anonymous">
+</body>
+</html>

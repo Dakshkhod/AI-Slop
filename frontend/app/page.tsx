@@ -3,6 +3,7 @@
 import { DomainBreakdown } from "@/components/DomainBreakdown";
 import { ForensicTrail } from "@/components/ForensicTrail";
 import { HeatmapView } from "@/components/HeatmapView";
+import { ProvenanceCard } from "@/components/ProvenanceCard";
 import { ScoreCard } from "@/components/ScoreCard";
 import { SignalChecklist } from "@/components/SignalChecklist";
 import { UploadZone } from "@/components/UploadZone";
@@ -77,10 +78,14 @@ export default function HomePage() {
                 ) : previewUrl && result.modality === "image" ? (
                   <PreviewBlock url={previewUrl} />
                 ) : null}
-                <ForensicTrail items={result.forensic_trail} />
+                <ForensicTrail
+                  items={result.provenance_trail}
+                  legacyItems={result.forensic_trail}
+                />
                 <SignalChecklist signals={result.signals} />
               </div>
               <div className="space-y-6 lg:col-span-2">
+                <ProvenanceCard trail={result.provenance_trail ?? []} />
                 <DomainBreakdown data={result.domain_real_confidence} />
                 <ModelBlock versions={result.model_versions} />
                 <PrivacyBlock />

@@ -28,6 +28,13 @@ exifread>=3.0
 piexif>=1.1
 ImageHash>=4.3
 
+# --- C2PA / Content Credentials (optional — service degrades to marker detection if absent) ---
+# Install separately if you want cryptographic C2PA chain verification:
+#   pip install c2pa-python
+# c2pa-python is not pinned here because it ships platform-specific wheels
+# and is large (~40 MB). Uncomment to install automatically:
+# c2pa-python>=0.5
+
 # --- Audio ---
 librosa>=0.10
 soundfile>=0.12

@@ -327,6 +327,45 @@ def build_forensic_trail(signals: List[SignalResult]) -> List[str]:
     return [t for _, t in rows[:10]]
 
 
+def build_provenance_trail(signals: List[SignalResult]) -> List[Any]:
+    """Structured provenance trail — sorted by impact, top-10 signals.
+
+    Returns a list of dicts matching the TrailItem schema.
+    Provenance-domain signals always appear first regardless of impact.
+    """
+    from ..schemas import TrailItem
+
+    _PROVENANCE_IDS = {"exif_coherence", "c2pa_presence", "screenshot_fingerprint", "provenance_vacuum"}
+
+    rows: List[Tuple[float, bool, SignalResult]] = []
+    for s in signals:
+        if s.error:
+            continue
+        impact = abs(s.p_ai - 0.5) * (TRUST.get(s.id, 0.5) * s.confidence + 0.01)
+        is_prov = s.id in _PROVENANCE_IDS
+        # Only include signals with meaningful impact or that are explicitly important
+        if impact > 0.01 or s.severity in (SignalSeverity.flag, SignalSeverity.warn, SignalSeverity.pass_):
+            rows.append((impact, is_prov, s))
+
+    # Sort: provenance signals first, then by impact descending
+    rows.sort(key=lambda r: (not r[1], -r[0]))
+    top = rows[:12]
+
+    return [
+        TrailItem(
+            layer=s.layer,
+            id=s.id,
+            name=s.name,
+            severity=s.severity,
+            p_ai=s.p_ai,
+            confidence=s.confidence,
+            plain_language=s.plain_language or s.name,
+            evidence=s.evidence,
+        )
+        for _, _, s in top
+    ]
+
+
 def build_checklist(signals: List[SignalResult]) -> List[str]:
     """Compact tick-list for the UI sidebar."""
     out: List[str] = []
@@ -359,5 +398,6 @@ def fuse_full(signals: List[SignalResult]) -> Dict:
         "verdict_label": label,
         "domain_breakdown": domain,
         "forensic_trail": build_forensic_trail(signals),
+        "provenance_trail": build_provenance_trail(signals),
         "checklist": build_checklist(signals),
     }

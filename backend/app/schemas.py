@@ -96,6 +96,31 @@ class HeatmapAsset(BaseModel):
     description: str = ""
 
 
+class TrailItem(BaseModel):
+    """One structured entry in the forensic provenance trail."""
+
+    layer: int
+    id: str
+    name: str
+    severity: SignalSeverity
+    p_ai: float
+    confidence: float
+    plain_language: str
+    evidence: Dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("evidence", mode="before")
+    @classmethod
+    def _coerce_evidence(cls, v: Any) -> Any:
+        return _to_jsonable(v) if v is not None else {}
+
+    @field_validator("p_ai", "confidence", mode="before")
+    @classmethod
+    def _coerce_floats(cls, v: Any) -> Any:
+        if isinstance(v, np.generic):
+            return float(v.item())
+        return v
+
+
 class AnalyzeResponse(BaseModel):
     request_id: str
     modality: Modality
@@ -111,6 +136,7 @@ class AnalyzeResponse(BaseModel):
     domain_real_confidence: DomainBreakdown
 
     forensic_trail: List[str]
+    provenance_trail: List["TrailItem"] = Field(default_factory=list)
     checklist: List[str]
     signals: List[SignalResult]
     heatmaps: List[HeatmapAsset] = Field(default_factory=list)

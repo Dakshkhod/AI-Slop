@@ -1,0 +1,85 @@
+/* TruthLens — inline image badge styles.
+   Injected on every page via the content script.
+   All selectors are namespaced with tl- to avoid collisions. */
+
+#tl-badge-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 2147483646;
+}
+
+.tl-badge {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+  line-height: 1;
+  cursor: pointer;
+  pointer-events: all;
+  opacity: 0.55;
+  transition: opacity 0.15s, transform 0.15s;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+  border: 1.5px solid rgba(255, 255, 255, 0.35);
+  user-select: none;
+}
+
+.tl-badge:hover {
+  opacity: 1;
+  transform: scale(1.15);
+}
+
+/* Pending / analysing state */
+.tl-badge--pending {
+  background: rgba(50, 55, 90, 0.85);
+}
+.tl-badge--pending .tl-badge__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #9aa1c2;
+  animation: tl-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes tl-pulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.8); }
+  50%       { opacity: 1;   transform: scale(1.2); }
+}
+
+/* Likely real — green */
+.tl-badge--real {
+  background: rgba(20, 120, 60, 0.88);
+  color: #b6f5cf;
+}
+
+/* Likely AI — red */
+.tl-badge--ai {
+  background: rgba(160, 20, 40, 0.88);
+  color: #ffc0cb;
+}
+
+/* Inconclusive — amber */
+.tl-badge--inc {
+  background: rgba(150, 100, 0, 0.88);
+  color: #ffe8a0;
+}
+
+/* Error state — grey */
+.tl-badge--error {
+  background: rgba(50, 50, 60, 0.75);
+  color: #9aa1c2;
+}
+
+.tl-badge__icon {
+  pointer-events: none;
+  font-style: normal;
+}

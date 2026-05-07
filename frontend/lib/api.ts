@@ -24,6 +24,17 @@ export type SignalResult = {
   error?: string | null;
 };
 
+export type TrailItem = {
+  layer: number;
+  id: string;
+  name: string;
+  severity: Severity;
+  p_ai: number;
+  confidence: number;
+  plain_language: string;
+  evidence: Record<string, unknown>;
+};
+
 export type Heatmap = {
   kind: "gradcam" | "noise" | "fft" | "block";
   mime: string;
@@ -43,6 +54,7 @@ export type AnalyzeResponse = {
   p_ai: number;
   domain_real_confidence: DomainBreakdown;
   forensic_trail: string[];
+  provenance_trail: TrailItem[];
   checklist: string[];
   signals: SignalResult[];
   heatmaps: Heatmap[];

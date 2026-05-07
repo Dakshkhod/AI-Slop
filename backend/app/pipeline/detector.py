@@ -14,7 +14,7 @@ from PIL import Image
 from torchvision import transforms
 
 _BASE = Path(__file__).resolve().parents[2]
-_CHECKPOINT_PATH = _BASE / "best_model_v3.pth"
+_CHECKPOINT_PATH = _BASE / "best_model_v4.pth"
 _T_PATH = _BASE / "T.json"
 with open(_T_PATH, encoding="utf-8") as f:
     _T = float(json.load(f)["temperature"])

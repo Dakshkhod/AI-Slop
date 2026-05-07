@@ -167,6 +167,25 @@ averaged into the verdict.
 
 ---
 
+## Honest Performance Numbers
+
+These numbers are measured on production-like data, not training distribution.
+We publish the truth.
+
+| Eval Set         | AUC    | Accuracy | False Positive Rate (real flagged as AI) |
+|------------------|--------|----------|------------------------------------------|
+| eval_modern      | _to be measured_ | _to be measured_ | _to be measured_ |
+| eval_compressed  | _to be measured_ | _to be measured_ | _to be measured_ |
+| eval_screenshots | _to be measured_ | _to be measured_ | _to be measured_ |
+
+**eval_modern** — clean images from current generators vs. real photos.
+**eval_compressed** — same images after double-JPEG compression (simulates WhatsApp/Telegram forwarding).
+**eval_screenshots** — same images rendered as phone screenshots across three device profiles.
+
+To reproduce: see [`evaluation/README.md`](evaluation/README.md).
+
+---
+
 ## Honest limits
 
 Read **section 11** of the project outline. Highlights:
