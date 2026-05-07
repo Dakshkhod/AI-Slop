@@ -187,6 +187,113 @@ def _ai_software_signature(software: str) -> Optional[str]:
     return None
 
 
+def _real_software_signature(software: str) -> Optional[str]:
+    """Recognize legitimate camera/phone/editor software in EXIF Software tag.
+
+    These are near-ground-truth real-photo signatures: AI generators do not
+    write 'Google', 'iPhone', 'Canon', 'WhatsApp' into the Software field.
+    Returns the matched needle or None.
+    """
+    if not software:
+        return None
+    s = software.lower()
+    needles = [
+        # Phone OS / camera apps
+        "google",        # Pixel / Android
+        "android",
+        "apple",
+        "ios",
+        "iphone",
+        "ipad",
+        "samsung",
+        "oneplus",
+        "xiaomi",
+        "redmi",
+        "oppo",
+        "vivo",
+        "huawei",
+        "honor",
+        "realme",
+        "motorola",
+        "nokia",
+        "pixel",
+        "gcam",
+        # Camera makers
+        "canon",
+        "nikon",
+        "sony",
+        "fujifilm",
+        "fuji ",
+        "olympus",
+        "panasonic",
+        "leica",
+        "ricoh",
+        "pentax",
+        "hasselblad",
+        "sigma",
+        "gopro",
+        "dji",
+        # Photo editors (real photos getting touched up)
+        "adobe photoshop",
+        "lightroom",
+        "capture one",
+        "darktable",
+        "rawtherapee",
+        "snapseed",
+        "vsco",
+        "afterlight",
+        "facetune",
+        # Messaging apps (transit, but only carry real photos through)
+        "whatsapp",
+        "telegram",
+        "wechat",
+        "line",
+        "signal",
+        "instagram",
+        "messenger",
+    ]
+    for n in needles:
+        if n in s:
+            return n
+    return None
+
+
+def _filename_camera_hint(filename: str | None) -> Optional[str]:
+    """Recognize phone/camera filename patterns. Returns matched pattern."""
+    if not filename:
+        return None
+    import re
+
+    f = filename.lower()
+    patterns = [
+        # WhatsApp transit: IMG-20250308-WA0123.jpg
+        (r"img-\d{8}-wa\d{4}", "whatsapp"),
+        # Phone camera: IMG_20250716_224621.jpg, 20250716_224621.jpg
+        (r"img_\d{8}_\d{6}", "phone_camera"),
+        (r"^\d{8}_\d{6}", "phone_camera"),
+        # Pixel: PXL_20250716_224621123.jpg
+        (r"pxl_\d{8}_\d+", "pixel"),
+        # iPhone: IMG_1234.HEIC, IMG_1234.JPG
+        (r"img_\d{4,5}\.", "iphone_style"),
+        # DSLR: DSC_1234.JPG, DSC01234.JPG, _DSC1234.JPG, IMG-DSC
+        (r"^_?dsc[_]?\d+", "dslr"),
+        (r"^dscf\d+", "fujifilm"),  # Fujifilm
+        # Canon: IMG_E1234.JPG (edited), 100CANON folder pattern
+        (r"^img_e\d+", "canon_edited"),
+        # GoPro
+        (r"^gopr\d+", "gopro"),
+        (r"^gp\d+", "gopro"),
+        # Nikon: DSC_, NIKON_
+        (r"^nikon", "nikon"),
+        # Samsung
+        (r"^\d{8}-\d{6}", "samsung_camera"),
+    ]
+    for pat, name in patterns:
+        if re.search(pat, f):
+            return name
+    return None
+
+
 def _filename_screenshot_hint(filename: str | None) -> bool:
     if not filename:
         return False
@@ -218,7 +325,11 @@ def metadata_signal(
     # confidence here than before because complete EXIF absence is one of
     # the most reliable provenance signals available.
     exif_confidence = 0.85
-    if n_present == 0:
+    software = str(fields.get("software", ""))
+    real_software_hint = _real_software_signature(software) if software else None
+    filename_camera_hint = _filename_camera_hint(filename)
+
+    if n_present == 0 and not real_software_hint and not filename_camera_hint:
         p_ai = 0.78
         sev = SignalSeverity.flag
         plain = (
@@ -226,7 +337,7 @@ def metadata_signal(
             "Real photos almost always retain at least some EXIF (Make, "
             "Model, ExposureTime, ISO, FNumber, …)."
         )
-    elif n_present <= 2:
+    elif n_present <= 2 and not real_software_hint and not filename_camera_hint:
         p_ai = 0.62
         sev = SignalSeverity.warn
         plain = f"Only {n_present} sensor EXIF fields present; many missing."
@@ -242,7 +353,29 @@ def metadata_signal(
             f"real capture device."
         )
 
-    software = str(fields.get("software", ""))
+    # Phone / camera / editor / messenger software in the Software tag is
+    # near-ground-truth evidence of a real photo: AI generators don't write
+    # 'Google', 'iPhone', 'Canon', 'WhatsApp', etc. Pull p_ai down strongly,
+    # even if there are only 1-2 EXIF fields (phones often strip the rest).
+    if real_software_hint:
+        p_ai = min(p_ai, 0.18)
+        sev = SignalSeverity.pass_
+        plain = (
+            f"EXIF Software tag identifies a real camera / phone / editor: "
+            f"'{software}' (matched '{real_software_hint}')."
+        )
+
+    # Camera/phone-style filename pattern (IMG_20250716_..., IMG-WA-..., DSC_...)
+    # is also strong real-photo evidence — AI exporters use names like
+    # 'ChatGPT Image ...png' or random hashes, not phone-camera conventions.
+    if filename_camera_hint and not real_software_hint:
+        p_ai = min(p_ai, 0.25)
+        sev = SignalSeverity.pass_
+        plain = (
+            f"Filename matches a phone/camera pattern ('{filename_camera_hint}') "
+            f"— consistent with a real capture device."
+        )
+
     ai_hint = _ai_software_signature(software) if software else None
     if ai_hint:
         p_ai = max(p_ai, 0.95)
@@ -266,6 +399,8 @@ def metadata_signal(
                 "fields_found": list(fields.keys()),
                 "fields": fields,
                 "software_hint": ai_hint,
+                "real_software_hint": real_software_hint,
+                "filename_camera_hint": filename_camera_hint,
             },
             plain_language=plain,
         )

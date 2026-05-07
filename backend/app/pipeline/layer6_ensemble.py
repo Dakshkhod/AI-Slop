@@ -59,24 +59,25 @@ TRUST: Dict[str, float] = {
     "wavelet_kurtosis": 0.4,
     "prnu_residual": 0.4,
     "double_jpeg": 0.5,
-    # Layer 4 — ML detectors. The most reliable directional signal we have
-    # on consumer images. v4 (EfficientNet-B4) trust raised after calibrated
-    # eval (AUC=0.83, FPR=6%) showed it consistently outperforms heuristics.
-    "ml_image": 2.8,
+    # Layer 4 — ML detectors. The v4 EfficientNet-B4 has measured FPR ~12%
+    # at threshold 0.35, so a single ML signal can be wrong on phone-
+    # compressed real photos. Keep it as the leading directional signal
+    # but not so dominant that an isolated FP overrides everything.
+    "ml_image": 2.2,
     "ml_clip": 1.8,
-    "ml_face": 2.2,
+    "ml_face": 2.0,
     "ml_audio": 2.0,
     # Layer 5 — semantic / biological heuristics. These were designed for
-    # old-style deepfakes and fail systematically on modern generative-AI
-    # portraits (Midjourney, SDXL, ChatGPT image, Imagen, Gemini). Modern
-    # generators produce symmetric faces, plausible catchlights, and even
-    # fool rPPG. Down-weight to corroboration only — never primary.
-    "light_consistency": 0.08,
-    "color_naturalness": 0.05,
-    "edge_perfection": 0.08,
-    "facial_symmetry": 0.30,
-    "eye_catchlight_consistency": 0.30,
-    "rppg_heartbeat": 0.35,
+    # old-style deepfakes and partially fail on modern generative AI, but
+    # they ARE useful at confirming real photos (a real human face does
+    # exhibit asymmetry and rPPG-detectable pulses). Keep moderate trust
+    # so they help the real-photo side; the ML override handles AI cases.
+    "light_consistency": 0.20,
+    "color_naturalness": 0.15,
+    "edge_perfection": 0.20,
+    "facial_symmetry": 0.55,
+    "eye_catchlight_consistency": 0.50,
+    "rppg_heartbeat": 0.55,
     "temporal_stability": 0.6,
     "vocal_tract_plausibility": 0.95,
     "audio_noise_floor": 0.4,
@@ -206,25 +207,36 @@ _ML_IDS = {"ml_image", "ml_clip", "ml_face", "ml_audio"}
 def _has_strong_real_provenance(signals: List[SignalResult] | None) -> bool:
     """True when provenance signals near-conclusively indicate a real photo.
 
-    Triggers on:
-      • Full camera EXIF (exif_coherence p_ai ≤ 0.25, i.e. ≥6 sensor fields
-        present — Make, Model, ExposureTime, ISO, FNumber, LensModel, …)
-      • Verified C2PA / Content Credentials (c2pa_presence p_ai ≤ 0.10)
-    Used to block the ML override on the headline score and verdict so a
-    v4 model false-positive cannot mislabel a photo with proof-of-camera.
+    Triggers on ANY of:
+      • Full camera EXIF: ≥6 sensor fields with Make/Model present
+      • Real-software signature: EXIF Software tag matches a known phone /
+        camera / editor / messenger (Google, iPhone, Canon, WhatsApp, …)
+      • Camera-style filename: IMG_YYYYMMDD_HHMMSS, IMG-YYYYMMDD-WAxxxx,
+        DSC_xxxx, PXL_xxxx, etc.
+      • Verified C2PA / Content Credentials manifest
+
+    Used to block the ML AI-direction override so a v4 model false-positive
+    cannot mislabel a photo carrying any of the above near-ground-truth
+    real-photo signatures. AI generators don't write any of these.
     """
     if not signals:
         return False
     for s in signals:
         if s.error or s.confidence < 0.6:
             continue
-        if s.id == "exif_coherence" and s.p_ai <= 0.25:
-            fields = s.evidence.get("fields", {}) if isinstance(s.evidence, dict) else {}
-            # Require at least one core camera tag (make/model) actually
-            # present — guards against a malformed EXIF block that just
-            # happens to count fields.
-            if any(k in fields for k in ("make", "camera_model", "image_make", "image_model")):
+        if s.id == "exif_coherence":
+            ev = s.evidence if isinstance(s.evidence, dict) else {}
+            # 1. Real software signature in EXIF (Google/iPhone/Canon/...)
+            if ev.get("real_software_hint"):
                 return True
+            # 2. Camera/phone filename pattern
+            if ev.get("filename_camera_hint"):
+                return True
+            # 3. Full camera EXIF block with Make/Model
+            if s.p_ai <= 0.25:
+                fields = ev.get("fields", {})
+                if any(k in fields for k in ("make", "camera_model", "image_make", "image_model")):
+                    return True
         if s.id == "c2pa_presence" and s.p_ai <= 0.10:
             return True
     return False
@@ -266,16 +278,17 @@ def label_for(
     # can decide whether to commit or back off.
     # ----------------------------------------------------------------
     ml_p, ml_c, ml_n = _ml_consensus(signals)
-    ml_says_ai = ml_p is not None and ml_p >= 0.55 and ml_c >= 0.35
+    ml_says_ai = ml_p is not None and ml_p >= 0.60 and ml_c >= 0.4
     ml_says_real = ml_p is not None and ml_p <= 0.40 and ml_c >= 0.35
-    # Strong-AI threshold raised back to 0.65 because the v4 model has a
-    # measured FPR of ~12% at threshold 0.35 — at ml_p in the 0.55-0.65
-    # band the model is genuinely uncertain and should not override
-    # corroborating real-photo evidence.
-    ml_strong_ai = ml_p is not None and ml_p >= 0.65 and ml_c >= 0.5
-    ml_strong_real = ml_p is not None and ml_p <= 0.35 and ml_c >= 0.5
+    # Strong-AI threshold raised to 0.72 because the v4 model has a
+    # measured FPR of ~12% — only override at very high confidence. The
+    # band 0.55-0.72 produces too many false positives on phone-camera
+    # real photos.
+    ml_strong_ai = ml_p is not None and ml_p >= 0.72 and ml_c >= 0.55
+    ml_strong_real = ml_p is not None and ml_p <= 0.30 and ml_c >= 0.5
 
-    # Real photos with full camera EXIF (or verified C2PA) get protection
+    # Real photos with any provenance signature (full EXIF, phone-camera
+    # software tag, camera-style filename, or verified C2PA) get protection
     # from ML false-positives — these are near-ground-truth real signals.
     has_real_provenance = _has_strong_real_provenance(signals)
     if has_real_provenance:
@@ -314,17 +327,20 @@ def label_for(
     if ml_strong_real:
         return Verdict.likely_real, "Likely real (ML model confident)"
 
-    # 2. Standard fusion-based labels.
-    if p_ai >= 0.55:
+    # 2. Standard fusion-based labels. Conservative thresholds because the
+    # v4 ML signal has FPR ~12% — we don't want a borderline ml_p around
+    # 0.6 to single-handedly drag the fusion past "Likely AI" cutoff.
+    if p_ai >= 0.65:
         return Verdict.likely_ai, "Likely AI-generated"
-    if p_ai >= 0.48:
-        # Lean AI; only escalate to Inconclusive if ML actively disagrees.
+    if p_ai >= 0.55:
+        # Lean AI; only commit if ML clearly agrees AND there's no
+        # countervailing real-provenance signal.
+        if ml_says_ai and not has_real_provenance:
+            return Verdict.likely_ai, "Likely AI-generated"
         if ml_says_real:
             return Verdict.inconclusive, (
                 "Inconclusive — ML reads real but other signals are uncertain"
             )
-        if ml_says_ai:
-            return Verdict.likely_ai, "Likely AI-generated"
         return Verdict.inconclusive, "Inconclusive — leaning AI"
 
     # 3. Disagreement near the boundary.
@@ -332,26 +348,29 @@ def label_for(
     if band_pct >= 24.0 and near_boundary:
         return Verdict.inconclusive, "Inconclusive — signals disagree"
 
-    # 4. Real-leaning. ML still gets the final say when it disagrees —
-    #    a low fused p_ai often just means broken heuristics voted "real."
+    # 4. Real-leaning. With v4's high FPR, ml_says_ai alone (≥0.60) is
+    #    NOT enough to flip a fused-real verdict to AI — the fusion
+    #    correctly reflects the rest of the signals. Only ml_strong_ai
+    #    (≥0.72 with high confidence and no real-provenance) earns that.
     if p_ai <= 0.32:
-        if ml_says_ai:
-            return Verdict.likely_ai, "Likely AI-generated (ML detectors override)"
+        if ml_strong_ai:
+            return Verdict.likely_ai, "Likely AI-generated (ML model very confident)"
         if sg_ai and not ml_says_real:
             return Verdict.inconclusive, (
                 "Inconclusive — provenance flags AI but ML detectors disagree"
             )
-        if not ml_says_real:
-            return Verdict.inconclusive, "Inconclusive — weak evidence for real"
+        # No need to require ml_says_real — fused p_ai ≤ 0.32 with
+        # corroborating evidence (heuristics, provenance) is enough for
+        # "Likely real" even if ML is silent or borderline.
         return Verdict.likely_real, "Likely real"
     if p_ai <= 0.45:
-        if ml_says_ai:
-            return Verdict.likely_ai, "Likely AI-generated (ML detectors override)"
+        if ml_strong_ai:
+            return Verdict.likely_ai, "Likely AI-generated (ML model very confident)"
         if sg_ai and not ml_says_real:
             return Verdict.inconclusive, (
                 "Inconclusive — provenance flags AI"
             )
-        if ml_strong_real:
+        if has_real_provenance or ml_strong_real:
             return Verdict.likely_real, "Likely real"
         return Verdict.inconclusive, "Leaning real"
 
@@ -437,27 +456,29 @@ def fuse_full(signals: List[SignalResult]) -> Dict:
     if p_xgb is not None:
         p_ai = 0.5 * p_ai + 0.5 * float(p_xgb)
 
-    # ML override on the headline number: when the trained ML model is
-    # confident and disagrees with the fused score, pull the fused p_ai
-    # toward the ML consensus so the displayed score matches the verdict
-    # label. The override is GATED in two ways:
-    #   1. Strong real provenance (full camera EXIF or verified C2PA)
-    #      blocks the AI-direction override entirely — the model's
-    #      false-positive rate (~12%) cannot be allowed to override
-    #      proof-of-camera.
-    #   2. Threshold raised to 0.65 (was 0.58) so only confident model
-    #      verdicts move the score, not borderline 0.55-0.65 calls.
+    # ML override on the headline number — gated three ways:
+    #   1. Strong real provenance (full camera EXIF, phone software tag,
+    #      camera-style filename, or verified C2PA) blocks the AI override
+    #      entirely. AI generators don't fake any of these.
+    #   2. AI threshold raised to 0.72 so only very-confident model
+    #      verdicts move the score (FPR is ~12% in 0.55-0.72 band).
+    #   3. Lighter blend (50/50) and lower floor (0.55) so the override
+    #      respects countervailing real-photo evidence.
     ml_p, ml_c, _ml_n = _ml_consensus(signals)
     has_real_prov = _has_strong_real_provenance(signals)
-    if ml_p is not None and ml_c >= 0.5:
-        if ml_p >= 0.65 and p_ai < ml_p and not has_real_prov:
-            # Strong-AI: blend 60% ML + 40% fused, floor at 0.58.
-            # Lighter blend than before so an isolated ML FP cannot
-            # single-handedly flip a photo where most signals say real.
-            p_ai = max(0.58, 0.60 * ml_p + 0.40 * p_ai)
-        elif ml_p <= 0.35 and p_ai > ml_p:
+    if ml_p is not None and ml_c >= 0.55:
+        if ml_p >= 0.72 and p_ai < ml_p and not has_real_prov:
+            # Strong-AI: blend 50% ML + 50% fused, floor at 0.55.
+            p_ai = max(0.55, 0.50 * ml_p + 0.50 * p_ai)
+        elif ml_p <= 0.30 and p_ai > ml_p:
             # Strong-real: blend 70% ML + 30% fused, ceil at 0.40.
             p_ai = min(0.40, 0.70 * ml_p + 0.30 * p_ai)
+    # Real-provenance ceiling: when a phone/camera signature is present,
+    # cap p_ai at 0.5 even if the ML model fired high. The headline score
+    # will then never drop below 50, matching the "real" provenance
+    # evidence visible to the user.
+    if has_real_prov:
+        p_ai = min(p_ai, 0.45)
 
     score = float(round((1.0 - p_ai) * 100.0, 1))
     verdict, label = label_for(p_ai, uncertainty_score, signals=signals)
