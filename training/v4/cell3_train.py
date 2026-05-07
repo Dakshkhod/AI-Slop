@@ -21,7 +21,6 @@ torch.backends.cudnn.allow_tf32       = True
 CFG = {
     "data_dir":     DATA_DIR,           # set in cell2
     "output_dir":   "/content/outputs_v4",
-    "prev_ckpt":    "/content/best_model_v3.pth",
     "model":        "efficientnet_b4",
     "img_size":     224,
     "batch_size":   48,
@@ -42,20 +41,29 @@ random.seed(CFG["seed"])
 np.random.seed(CFG["seed"])
 device = torch.device(CFG["device"])
 
-# ── JPEG helper (avoids albumentations v2 API breakage) ──────────────────────
-def jpeg_compress(img: np.ndarray, quality: int) -> np.ndarray:
+# ── JPEG helpers — named functions so they pickle cleanly with num_workers>0 ──
+def jpeg_heavy(img: np.ndarray, **kw) -> np.ndarray:
+    """Quality 40-92: simulates heavily-compressed social-media reposts."""
     pil = Image.fromarray(img)
     buf = io.BytesIO()
-    pil.save(buf, format="JPEG", quality=quality)
+    pil.save(buf, format="JPEG", quality=random.randint(40, 92))
+    buf.seek(0)
+    return np.array(Image.open(buf).convert("RGB"))
+
+def jpeg_light(img: np.ndarray, **kw) -> np.ndarray:
+    """Quality 50-88: lighter second-pass compression."""
+    pil = Image.fromarray(img)
+    buf = io.BytesIO()
+    pil.save(buf, format="JPEG", quality=random.randint(50, 88))
     buf.seek(0)
     return np.array(Image.open(buf).convert("RGB"))
 
 # ── Augmentation ──────────────────────────────────────────────────────────────
 train_tfm = A.Compose([
-    A.Lambda(image=lambda img, **kw: jpeg_compress(img, random.randint(40, 92)), p=0.85),
+    A.Lambda(image=jpeg_heavy, p=0.85),
     A.RandomScale(scale_limit=(-0.4, -0.05), p=0.35),
     A.Resize(CFG["img_size"], CFG["img_size"]),
-    A.Lambda(image=lambda img, **kw: jpeg_compress(img, random.randint(50, 88)), p=0.4),
+    A.Lambda(image=jpeg_light, p=0.4),
     A.RandomResizedCrop(size=(CFG["img_size"], CFG["img_size"]), scale=(0.7, 1.0), p=0.5),
     A.HorizontalFlip(p=0.5),
     A.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.2, hue=0.05, p=0.6),
