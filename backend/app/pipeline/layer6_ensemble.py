@@ -402,6 +402,22 @@ def fuse_full(signals: List[SignalResult]) -> Dict:
     p_xgb = try_xgb(signals)
     if p_xgb is not None:
         p_ai = 0.5 * p_ai + 0.5 * float(p_xgb)
+
+    # ML override on the headline number: when the trained ML model is
+    # confident and disagrees with the fused score, blend the fused p_ai
+    # toward the ML consensus. Without this, the headline 0..100 score
+    # visually contradicts the verdict label ("Likely AI" with score 52)
+    # because broken biological/semantic heuristics drag the fusion to
+    # the boundary even after their trust weights are reduced.
+    ml_p, ml_c, _ml_n = _ml_consensus(signals)
+    if ml_p is not None and ml_c >= 0.5:
+        if ml_p >= 0.58 and p_ai < ml_p:
+            # Strong-AI: blend 70% ML + 30% fused, floor at 0.60.
+            p_ai = max(0.60, 0.70 * ml_p + 0.30 * p_ai)
+        elif ml_p <= 0.35 and p_ai > ml_p:
+            # Strong-real: blend 70% ML + 30% fused, ceil at 0.40.
+            p_ai = min(0.40, 0.70 * ml_p + 0.30 * p_ai)
+
     score = float(round((1.0 - p_ai) * 100.0, 1))
     verdict, label = label_for(p_ai, uncertainty_score, signals=signals)
     return {
