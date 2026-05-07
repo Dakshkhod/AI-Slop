@@ -88,27 +88,21 @@ def get_model() -> TruthLensModel:
         raise FileNotFoundError(f"Checkpoint not found: {_CHECKPOINT_PATH}")
 
     _device = _pick_device()
-    # The v4 checkpoint was saved on Colab (Linux), so its config dict
-    # contains pathlib.PosixPath objects. On Windows, PosixPath cannot be
-    # instantiated, so we temporarily alias it to WindowsPath during load.
+    # The v4 checkpoint was saved on Colab (Linux); its config dict contains
+    # pathlib.PosixPath objects, which Windows cannot instantiate. We trust
+    # our own checkpoint, so use weights_only=False directly and alias
+    # PosixPath→WindowsPath on Windows for the duration of the load.
     is_windows = platform.system() == "Windows"
     if is_windows:
         _saved_posix = pathlib.PosixPath
         pathlib.PosixPath = pathlib.WindowsPath  # type: ignore[misc]
     try:
-        try:
-            ckpt = torch.load(_CHECKPOINT_PATH, map_location="cpu", weights_only=True)
-        except Exception as exc:
-            log.warning(
-                "Safe checkpoint load failed for %s; falling back to trusted full load: %s",
-                _CHECKPOINT_PATH.name,
-                exc,
-            )
-            ckpt = torch.load(_CHECKPOINT_PATH, map_location="cpu", weights_only=False)
+        ckpt = torch.load(_CHECKPOINT_PATH, map_location="cpu", weights_only=False)
     finally:
         if is_windows:
             pathlib.PosixPath = _saved_posix  # type: ignore[misc]
     state_dict = ckpt["model_state"] if isinstance(ckpt, dict) and "model_state" in ckpt else ckpt
+    log.info("Loaded v4 checkpoint: %s", _CHECKPOINT_PATH.name)
 
     model = TruthLensModel()
     model.load_state_dict(state_dict)
