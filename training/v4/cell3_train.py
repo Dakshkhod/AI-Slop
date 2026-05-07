@@ -116,7 +116,7 @@ val_loader   = DataLoader(val_ds,   batch_size=CFG["batch_size"], shuffle=False,
 class TruthLensModel(nn.Module):
     def __init__(self):
         super().__init__()
-        self.backbone = timm.create_model(CFG["model"], pretrained=False,
+        self.backbone = timm.create_model(CFG["model"], pretrained=True,
                                           num_classes=0, global_pool="avg")
         dim = self.backbone.num_features
         self.head = nn.Sequential(
@@ -128,22 +128,7 @@ class TruthLensModel(nn.Module):
         return self.head(self.backbone(x))
 
 model = TruthLensModel().to(device)
-
-# Load v3 backbone weights
-prev = CFG["prev_ckpt"]
-if Path(prev).exists():
-    print(f"Loading backbone from {prev} ...")
-    torch.serialization.add_safe_globals([np.core.multiarray.scalar])
-    ckpt = torch.load(prev, map_location="cpu", weights_only=True)
-    backbone_state = {
-        k.replace("backbone.", ""): v
-        for k, v in ckpt["model_state"].items()
-        if k.startswith("backbone.")
-    }
-    missing, unexpected = model.backbone.load_state_dict(backbone_state, strict=False)
-    print(f"  Missing: {len(missing)}  Unexpected: {len(unexpected)}")
-else:
-    print("No prev checkpoint found — training from scratch.")
+print("Using ImageNet pretrained EfficientNet-B4 backbone.")
 
 # Freeze backbone initially, train head only
 for p in model.backbone.parameters():
