@@ -59,21 +59,24 @@ TRUST: Dict[str, float] = {
     "wavelet_kurtosis": 0.4,
     "prnu_residual": 0.4,
     "double_jpeg": 0.5,
-    # Layer 4 — ML detectors. The most reliable directional signal we
-    # have on consumer images. Weighted to dominate the fusion when a
-    # clear majority of detectors agree.
-    "ml_image": 1.7,
-    "ml_clip": 1.5,
-    "ml_face": 1.9,
+    # Layer 4 — ML detectors. The most reliable directional signal we have
+    # on consumer images. v4 (EfficientNet-B4) trust raised after calibrated
+    # eval (AUC=0.83, FPR=6%) showed it consistently outperforms heuristics.
+    "ml_image": 2.8,
+    "ml_clip": 1.8,
+    "ml_face": 2.2,
     "ml_audio": 2.0,
-    # Layer 5 — semantic image checks are *very* noisy on web/CDN photos.
-    # Visible to the user but near-zero weight in fusion.
+    # Layer 5 — semantic / biological heuristics. These were designed for
+    # old-style deepfakes and fail systematically on modern generative-AI
+    # portraits (Midjourney, SDXL, ChatGPT image, Imagen, Gemini). Modern
+    # generators produce symmetric faces, plausible catchlights, and even
+    # fool rPPG. Down-weight to corroboration only — never primary.
     "light_consistency": 0.08,
     "color_naturalness": 0.05,
     "edge_perfection": 0.08,
-    "facial_symmetry": 0.9,
-    "eye_catchlight_consistency": 0.85,
-    "rppg_heartbeat": 1.1,
+    "facial_symmetry": 0.30,
+    "eye_catchlight_consistency": 0.30,
+    "rppg_heartbeat": 0.35,
     "temporal_stability": 0.6,
     "vocal_tract_plausibility": 0.95,
     "audio_noise_floor": 0.4,
@@ -236,9 +239,13 @@ def label_for(
     # can decide whether to commit or back off.
     # ----------------------------------------------------------------
     ml_p, ml_c, ml_n = _ml_consensus(signals)
-    ml_says_ai = ml_p is not None and ml_p >= 0.55 and ml_c >= 0.35
-    ml_says_real = ml_p is not None and ml_p <= 0.45 and ml_c >= 0.35
-    ml_strong_ai = ml_p is not None and ml_p >= 0.65 and ml_c >= 0.5
+    ml_says_ai = ml_p is not None and ml_p >= 0.50 and ml_c >= 0.35
+    ml_says_real = ml_p is not None and ml_p <= 0.40 and ml_c >= 0.35
+    # Strong-AI threshold lowered from 0.65 → 0.58. The v4 EfficientNet-B4
+    # ML signal is well-calibrated (T=1.27, ECE≈0) — when it crosses 0.58
+    # AI it is genuinely confident, and we must not let broken biological /
+    # semantic heuristics drag the verdict back to "real".
+    ml_strong_ai = ml_p is not None and ml_p >= 0.58 and ml_c >= 0.5
     ml_strong_real = ml_p is not None and ml_p <= 0.35 and ml_c >= 0.5
 
     # Provenance / non-ML "smoking guns" — only consulted when ML is
@@ -264,31 +271,38 @@ def label_for(
     # ----------------------------------------------------------------
     # Decision tree — ML now leads.
     # ----------------------------------------------------------------
-    # 1. Strong ML — commit, regardless of weak provenance noise.
-    if ml_strong_ai and p_ai >= 0.5:
-        return Verdict.likely_ai, "Likely AI-generated (ML detectors agree)"
-    if ml_strong_real and p_ai <= 0.5:
-        return Verdict.likely_real, "Likely real (ML detectors agree)"
+    # 1. Strong ML — trust the trained model, even when broken heuristics
+    #    drag the fused p_ai below 0.5. The v4 ML signal is calibrated
+    #    and AUC=0.83 on the val set; biological/semantic heuristics fail
+    #    on modern generative-AI portraits and must not override it.
+    if ml_strong_ai:
+        return Verdict.likely_ai, "Likely AI-generated (ML model confident)"
+    if ml_strong_real:
+        return Verdict.likely_real, "Likely real (ML model confident)"
 
     # 2. Standard fusion-based labels.
-    if p_ai >= 0.62:
+    if p_ai >= 0.55:
         return Verdict.likely_ai, "Likely AI-generated"
-    if p_ai >= 0.52:
+    if p_ai >= 0.48:
         # Lean AI; only escalate to Inconclusive if ML actively disagrees.
         if ml_says_real:
             return Verdict.inconclusive, (
                 "Inconclusive — ML reads real but other signals are uncertain"
             )
-        return Verdict.likely_ai, "Likely AI-generated"
+        if ml_says_ai:
+            return Verdict.likely_ai, "Likely AI-generated"
+        return Verdict.inconclusive, "Inconclusive — leaning AI"
 
     # 3. Disagreement near the boundary.
     near_boundary = 0.42 <= p_ai <= 0.58
     if band_pct >= 24.0 and near_boundary:
         return Verdict.inconclusive, "Inconclusive — signals disagree"
 
-    # 4. Real-leaning.
+    # 4. Real-leaning. ML still gets the final say when it disagrees —
+    #    a low fused p_ai often just means broken heuristics voted "real."
     if p_ai <= 0.32:
-        # Be conservative with "real" claims: require explicit ML confirmation.
+        if ml_says_ai:
+            return Verdict.likely_ai, "Likely AI-generated (ML detectors override)"
         if sg_ai and not ml_says_real:
             return Verdict.inconclusive, (
                 "Inconclusive — provenance flags AI but ML detectors disagree"
@@ -297,8 +311,8 @@ def label_for(
             return Verdict.inconclusive, "Inconclusive — weak evidence for real"
         return Verdict.likely_real, "Likely real"
     if p_ai <= 0.45:
-        # Soft real lean — provenance can pull this back to Inconclusive
-        # only when ML did not actively confirm "real".
+        if ml_says_ai:
+            return Verdict.likely_ai, "Likely AI-generated (ML detectors override)"
         if sg_ai and not ml_says_real:
             return Verdict.inconclusive, (
                 "Inconclusive — provenance flags AI"
