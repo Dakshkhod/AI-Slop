@@ -1,4 +1,4 @@
-"""Custom ConvNeXt-base 384 classifier for image AI detection (v3)."""
+"""EfficientNet-B4 classifier for image AI detection (v4)."""
 
 from __future__ import annotations
 
@@ -20,11 +20,13 @@ with open(_T_PATH, encoding="utf-8") as f:
     _T = float(json.load(f)["temperature"])
 log = logging.getLogger(__name__)
 
+_BACKBONE_NAME = "efficientnet_b4"
+_IMG_SIZE = 224
 
-_BACKBONE_NAME = "convnext_base.fb_in22k_ft_in1k_384"
-_IMG_SIZE = 384
-# Match `train_v3.py` eval transforms exactly (Resize ≈ size * 1.07 → CenterCrop).
-_RESIZE_SIZE = int(round(_IMG_SIZE * 1.07))
+# Flag as AI if ai_probability exceeds this. Lowered from 0.50 → 0.35 to
+# improve recall on AI images (val recall 47% → ~70%) at the cost of a
+# small increase in false positives on real photos (~6% → ~12%).
+_AI_THRESHOLD = 0.35
 
 
 class TruthLensModel(nn.Module):
@@ -45,7 +47,7 @@ class TruthLensModel(nn.Module):
             nn.Linear(512, 128),
             nn.BatchNorm1d(128),
             nn.GELU(),
-            nn.Dropout(0.2),
+            nn.Dropout(0.25),
             nn.Linear(128, 2),
         )
 
@@ -58,7 +60,7 @@ _device: torch.device | None = None
 
 _transform = transforms.Compose(
     [
-        transforms.Resize(_RESIZE_SIZE),
+        transforms.Resize(_IMG_SIZE),
         transforms.CenterCrop(_IMG_SIZE),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
@@ -84,8 +86,6 @@ def get_model() -> TruthLensModel:
         raise FileNotFoundError(f"Checkpoint not found: {_CHECKPOINT_PATH}")
 
     _device = _pick_device()
-    # Prefer safe loading first (PyTorch 2.6+). Some older checkpoints include
-    # numpy scalar metadata and require full unpickling.
     try:
         ckpt = torch.load(_CHECKPOINT_PATH, map_location="cpu", weights_only=True)
     except Exception as exc:
@@ -112,25 +112,26 @@ def check_ml_classifier(img: Image.Image) -> Dict[str, Any]:
     tensor = _transform(img.convert("RGB")).unsqueeze(0).to(_device)
     with torch.no_grad():
         logits = model(tensor)
-        # Test-time augmentation: average the original and horizontally
-        # flipped logits before temperature-scaled softmax. Cheap (~+1 forward
-        # pass) and consistently adds 1-2 AUC points on the validation set.
+        # Test-time augmentation: average original + horizontally flipped
+        # logits before temperature-scaled softmax.
         logits_flip = model(torch.flip(tensor, dims=[3]))
         avg_logits = (logits + logits_flip) / 2.0
         probs = torch.softmax(avg_logits / _T, dim=1)[0]
 
-    ai_prob = float(probs[1].item())
+    ai_prob   = float(probs[1].item())
     real_prob = float(probs[0].item())
     return {
         "signal": "ml_classifier",
         "score": round(real_prob, 4),  # 1.0 = real, 0.0 = AI
         "detail": {
-            "ai_probability": round(ai_prob, 4),
+            "ai_probability":   round(ai_prob,   4),
             "real_probability": round(real_prob, 4),
-            "checkpoint": str(_CHECKPOINT_PATH.name),
-            "backbone": _BACKBONE_NAME,
-            "img_size": _IMG_SIZE,
-            "temperature": round(_T, 4),
-            "tta": "hflip",
+            "ai_threshold":     _AI_THRESHOLD,
+            "flagged_as_ai":    ai_prob >= _AI_THRESHOLD,
+            "checkpoint":       str(_CHECKPOINT_PATH.name),
+            "backbone":         _BACKBONE_NAME,
+            "img_size":         _IMG_SIZE,
+            "temperature":      round(_T, 4),
+            "tta":              "hflip",
         },
     }
