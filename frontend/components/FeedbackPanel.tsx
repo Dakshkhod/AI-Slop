@@ -17,12 +17,15 @@ type Stage =
   | "asking_correction"
   | "submitting"
   | "thanks_down"
+  | "already_reported"
   | "error";
 
 export default function FeedbackPanel({ result }: Props) {
   const [stage, setStage] = useState<Stage>("idle");
   const [comment, setComment] = useState("");
   const [errMsg, setErrMsg] = useState("");
+  const [agreeCount, setAgreeCount] = useState<number>(0);
+  const [needed, setNeeded] = useState<number>(3);
 
   const systemVerdict = {
     verdict: result.verdict,
@@ -54,7 +57,7 @@ export default function FeedbackPanel({ result }: Props) {
   const onSubmitCorrection = async (userVerdict: "real" | "ai") => {
     setStage("submitting");
     try {
-      await reportWrong({
+      const res = await reportWrong({
         request_id: result.request_id,
         user_verdict: userVerdict,
         filename: result.filename,
@@ -62,6 +65,17 @@ export default function FeedbackPanel({ result }: Props) {
         system_verdict: systemVerdict,
         comment: comment.trim(),
       });
+      const r = res as unknown as {
+        status?: string;
+        agree_count?: number;
+        needed_for_consensus?: number;
+      };
+      if (r.status === "already_reported") {
+        setStage("already_reported");
+        return;
+      }
+      setAgreeCount(r.agree_count ?? 1);
+      setNeeded(r.needed_for_consensus ?? 2);
       setStage("thanks_down");
     } catch (e) {
       setErrMsg(e instanceof Error ? e.message : "Failed to submit");
@@ -76,7 +90,7 @@ export default function FeedbackPanel({ result }: Props) {
           Was this verdict right?
         </h3>
         <span className="text-[10px] uppercase tracking-wider text-white/30">
-          helps us improve
+          reviewed before training
         </span>
       </div>
 
@@ -102,9 +116,12 @@ export default function FeedbackPanel({ result }: Props) {
       )}
 
       {stage === "thanks_up" && (
-        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-200">
-          Thanks — your confirmation is logged. The model uses these signals
-          for the next training run.
+        <div className="space-y-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-200">
+          <p>Thanks — confirmation logged.</p>
+          <p className="text-xs text-emerald-200/70">
+            Single ratings don&apos;t change predictions. They&apos;re aggregated
+            and reviewed before being added to the next training cycle.
+          </p>
         </div>
       )}
 
@@ -112,7 +129,10 @@ export default function FeedbackPanel({ result }: Props) {
         <div className="space-y-3">
           <p className="text-sm text-white/70">
             Tell us what it actually is. Your correction goes into a
-            hard-negative dataset and is used in the next retrain.
+            review queue — it does <em>not</em> change predictions
+            immediately, and is only added to training data after either
+            three independent users agree or a maintainer manually
+            verifies it.
           </p>
           <div className="flex gap-2">
             <button
@@ -146,9 +166,21 @@ export default function FeedbackPanel({ result }: Props) {
       )}
 
       {stage === "thanks_down" && (
-        <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">
-          Logged — thank you. This image will be reviewed and added to the
-          next training cycle&apos;s hard-negative set.
+        <div className="space-y-2 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">
+          <p>Logged — thank you.</p>
+          <p className="text-xs text-rose-200/80">
+            {agreeCount === 1
+              ? "You're the first to flag this image. We need 2 more independent users to agree (or a maintainer to verify) before it enters the training set."
+              : agreeCount >= 3
+                ? `${agreeCount} users agree this is wrong. Marked for review — will enter the next training cycle.`
+                : `${agreeCount} users have agreed so far. ${needed} more needed for automatic consensus.`}
+          </p>
+        </div>
+      )}
+
+      {stage === "already_reported" && (
+        <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-sm text-white/70">
+          You&apos;ve already reported this image with the same correction.
         </div>
       )}
 
