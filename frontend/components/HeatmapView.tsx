@@ -8,7 +8,7 @@ export function HeatmapView({ heatmaps }: { heatmaps: Heatmap[] }) {
   if (!heatmaps.length) return null;
   const h = heatmaps[idx];
   return (
-    <section className="overflow-hidden rounded-3xl border border-ink-700 bg-ink-900/60 p-5 backdrop-blur">
+    <section className="overflow-hidden rounded-2xl border border-ink-800 bg-ink-900 p-5">
       <div className="mb-3 flex items-center justify-between">
         <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-ink-300">
           Visual evidence
@@ -19,10 +19,10 @@ export function HeatmapView({ heatmaps }: { heatmaps: Heatmap[] }) {
               <button
                 key={i}
                 onClick={() => setIdx(i)}
-                className={`h-7 rounded-md px-3 text-xs font-medium ${
+                className={`h-7 rounded px-3 text-xs font-medium transition ${
                   i === idx
-                    ? "bg-accent-500 text-ink-950"
-                    : "bg-ink-800 text-ink-200 hover:bg-ink-700"
+                    ? "bg-ink-100 text-black"
+                    : "border border-ink-700 text-ink-300 hover:text-ink-100"
                 }`}
               >
                 {heatmaps[i].kind}
@@ -31,7 +31,7 @@ export function HeatmapView({ heatmaps }: { heatmaps: Heatmap[] }) {
           </div>
         )}
       </div>
-      <div className="overflow-hidden rounded-2xl bg-black/40 ring-1 ring-ink-700">
+      <div className="overflow-hidden rounded-lg border border-ink-800 bg-black">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={`data:${h.mime};base64,${h.data_base64}`}

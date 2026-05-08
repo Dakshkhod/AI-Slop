@@ -41,17 +41,17 @@ function bucketSignals(signals: SignalResult[]): {
 
 function SignalRow({ s }: { s: SignalResult }) {
   return (
-    <li className="rounded-xl border border-ink-700/40 bg-ink-950/40 p-3">
+    <li className="rounded-lg border border-ink-800 bg-black/30 p-2.5">
       <div className="flex items-start justify-between gap-2">
-        <span className="text-sm font-medium leading-tight text-ink-100">
+        <span className="text-[13px] font-medium leading-tight text-ink-100">
           {s.name}
         </span>
-        <span className="shrink-0 rounded-md bg-ink-800/80 px-1.5 py-0.5 font-mono text-[10px] text-ink-400 ring-1 ring-ink-700">
+        <span className="shrink-0 font-mono text-[10px] text-ink-500">
           L{s.layer}
         </span>
       </div>
       {s.plain_language && (
-        <p className="mt-1.5 text-xs leading-relaxed text-ink-300">
+        <p className="mt-1 text-[11px] leading-relaxed text-ink-400">
           {s.plain_language}
         </p>
       )}
@@ -62,31 +62,26 @@ function SignalRow({ s }: { s: SignalResult }) {
 function Column({ bucket }: { bucket: Bucket }) {
   const empty = bucket.signals.length === 0;
   return (
-    <div
-      className={`flex flex-col rounded-2xl border ${bucket.border} ${bucket.bg} p-4`}
-    >
-      <div className="mb-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-lg leading-none">{bucket.emoji}</span>
-          <h4 className="text-sm font-semibold tracking-tight text-ink-50">
-            {bucket.label}
-          </h4>
-        </div>
+    <div className={`flex flex-col rounded-lg border bg-black/20 p-4 ${bucket.border}`}>
+      <div className="mb-2 flex items-center justify-between">
+        <h4 className="text-[13px] font-semibold tracking-tight text-ink-100">
+          {bucket.label}
+        </h4>
         <span
-          className={`rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums ring-1 ${bucket.chipBg} ${bucket.chipText}`}
+          className={`rounded px-1.5 py-0.5 text-[10px] font-semibold tabular-nums ring-1 ${bucket.chipBg} ${bucket.chipText}`}
         >
           {bucket.signals.length}
         </span>
       </div>
-      <p className="mb-3 text-[11px] leading-relaxed text-ink-400">
+      <p className="mb-3 text-[11px] leading-relaxed text-ink-500">
         {bucket.desc}
       </p>
       {empty ? (
-        <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-ink-700/60 px-3 py-6 text-center text-xs text-ink-500">
-          Nothing in this bucket.
+        <div className="flex flex-1 items-center justify-center px-3 py-6 text-center text-[11px] text-ink-600">
+          —
         </div>
       ) : (
-        <ul className="space-y-2">
+        <ul className="space-y-1.5">
           {bucket.signals.map((s) => (
             <SignalRow key={s.id} s={s} />
           ))}
@@ -101,49 +96,48 @@ export function VerdictSummary({ signals }: { signals: SignalResult[] }) {
 
   const buckets: Bucket[] = [
     {
-      label: "Problems found",
-      emoji: "⚠",
-      desc: "Signals pointing toward AI generation. The stronger the impact, the higher in the list.",
-      bg: "bg-flag/5",
-      border: "border-flag/30",
-      chipBg: "bg-flag/15 ring-flag/40",
+      label: "Problems",
+      emoji: "",
+      desc: "Signals pointing toward AI generation, sorted by impact.",
+      bg: "bg-ink-900",
+      border: "border-l-2 border-l-flag border-ink-800",
+      chipBg: "bg-flag/10 ring-flag/30",
       chipText: "text-flag",
       signals: problems,
     },
     {
       label: "Ambiguous",
-      emoji: "?",
-      desc: "Signals that fired but with limited confidence — context-sensitive checks.",
-      bg: "bg-warn/5",
-      border: "border-warn/30",
-      chipBg: "bg-warn/15 ring-warn/40",
+      emoji: "",
+      desc: "Signals fired with limited confidence — context-sensitive.",
+      bg: "bg-ink-900",
+      border: "border-l-2 border-l-warn border-ink-800",
+      chipBg: "bg-warn/10 ring-warn/30",
       chipText: "text-warn",
       signals: ambiguous,
     },
     {
       label: "Passed",
-      emoji: "✓",
+      emoji: "",
       desc: "Signals consistent with a real, unmodified file.",
-      bg: "bg-ok/5",
-      border: "border-ok/30",
-      chipBg: "bg-ok/15 ring-ok/40",
+      bg: "bg-ink-900",
+      border: "border-l-2 border-l-ok border-ink-800",
+      chipBg: "bg-ok/10 ring-ok/30",
       chipText: "text-ok",
       signals: passed,
     },
   ];
 
   return (
-    <section className="rounded-3xl border border-ink-700 bg-ink-900/60 p-5 backdrop-blur">
+    <section className="rounded-2xl border border-ink-800 bg-ink-900 p-5">
       <div className="mb-4 flex items-baseline justify-between gap-3">
         <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-ink-300">
           What we found
         </h3>
-        <span className="text-xs text-ink-400">
-          {problems.length} problem{problems.length === 1 ? "" : "s"} ·{" "}
-          {ambiguous.length} ambiguous · {passed.length} passed
+        <span className="text-xs text-ink-500">
+          {problems.length} · {ambiguous.length} · {passed.length}
         </span>
       </div>
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-3">
         {buckets.map((b) => (
           <Column key={b.label} bucket={b} />
         ))}

@@ -95,7 +95,7 @@ export default function HomePage() {
                   items={result.provenance_trail}
                   legacyItems={result.forensic_trail}
                 />
-                <details className="group rounded-3xl border border-ink-700 bg-ink-900/40 backdrop-blur">
+                <details className="group rounded-2xl border border-ink-800 bg-ink-900">
                   <summary className="flex cursor-pointer items-center justify-between p-5 text-sm font-semibold uppercase tracking-[0.2em] text-ink-300 hover:text-ink-100">
                     All {result.signals.length} signals (technical)
                     <svg
@@ -134,24 +134,24 @@ export default function HomePage() {
 
 function Header() {
   return (
-    <header className="border-b border-ink-700/60 bg-ink-950/40 backdrop-blur sticky top-0 z-10">
+    <header className="sticky top-0 z-10 border-b border-ink-800 bg-black/80 backdrop-blur">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
-        <div className="flex items-center gap-2">
-          <div className="grid h-8 w-8 place-content-center rounded-xl bg-accent-500/20 ring-1 ring-accent-500/40">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7ee0ff" strokeWidth="2">
+        <div className="flex items-center gap-2.5">
+          <div className="grid h-7 w-7 place-content-center rounded-lg border border-ink-700 bg-ink-900">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#e5e5e5" strokeWidth="2">
               <circle cx="12" cy="12" r="3" />
               <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z" />
             </svg>
           </div>
-          <span className="text-lg font-semibold tracking-tight">TruthLens</span>
-          <span className="ml-1 rounded-full bg-ink-800 px-2 py-0.5 text-[10px] uppercase tracking-widest text-ink-300 ring-1 ring-ink-700">
+          <span className="text-[15px] font-semibold tracking-tight">TruthLens</span>
+          <span className="ml-1 rounded border border-ink-700 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.18em] text-ink-300">
             beta
           </span>
         </div>
         <nav className="hidden gap-6 text-sm text-ink-300 sm:flex">
-          <a href="#how" className="hover:text-ink-50">How it works</a>
-          <a href="#layers" className="hover:text-ink-50">Detection layers</a>
-          <a href="/docs" className="hover:text-ink-50">API</a>
+          <a href="#how" className="hover:text-ink-50 transition">How it works</a>
+          <a href="#layers" className="hover:text-ink-50 transition">Layers</a>
+          <a href="/docs" className="hover:text-ink-50 transition">API</a>
         </nav>
       </div>
     </header>
@@ -160,22 +160,17 @@ function Header() {
 
 function Hero() {
   return (
-    <section className="bg-grid relative -mx-6 mt-6 overflow-hidden rounded-3xl border border-ink-700/60 px-6 py-16 text-center">
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent via-ink-950/40 to-ink-950" />
-      <div className="relative">
-        <span className="inline-flex items-center gap-2 rounded-full border border-accent-500/40 bg-accent-500/10 px-3 py-1 text-xs font-medium uppercase tracking-widest text-accent-400">
-          Multi-modal · Explainable · Physics-based
-        </span>
-        <h1 className="mx-auto mt-4 max-w-3xl text-balance text-4xl font-bold tracking-tight text-ink-50 md:text-5xl">
-          Detect AI slop across <span className="text-accent-400">images</span>,{" "}
-          <span className="text-accent-400">video</span>, and{" "}
-          <span className="text-accent-400">audio</span>.
-        </h1>
-        <p className="mx-auto mt-4 max-w-2xl text-pretty text-base text-ink-300">
-          A 6-layer pipeline grounded in physics, not pixel-guessing. Every flag is
-          explained — you see <em>why</em>, not just <em>what</em>.
-        </p>
-      </div>
+    <section className="mt-16 text-center">
+      <span className="inline-flex items-center gap-2 rounded-full border border-ink-700 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.18em] text-ink-300">
+        Multi-modal · Explainable · Physics-based
+      </span>
+      <h1 className="mx-auto mt-5 max-w-3xl text-balance text-4xl font-semibold tracking-tight text-ink-50 md:text-5xl">
+        Detect AI slop across images, video, and audio.
+      </h1>
+      <p className="mx-auto mt-4 max-w-xl text-pretty text-[15px] leading-relaxed text-ink-300">
+        A 6-layer pipeline grounded in physics, not pixel-guessing. Every flag is
+        explained — you see <em>why</em>, not just <em>what</em>.
+      </p>
     </section>
   );
 }
@@ -190,13 +185,13 @@ function BusyBlock() {
     "Bayesian fusion",
   ];
   return (
-    <div className="mt-8 overflow-hidden rounded-3xl border border-ink-700 bg-ink-900/60 p-6">
+    <div className="mt-8 overflow-hidden rounded-2xl border border-ink-800 bg-ink-900 p-6">
       <div className="flex items-center justify-between">
         <p className="text-sm font-medium text-ink-100">
           Running 6-layer pipeline…
         </p>
         <div className="h-1.5 w-32 overflow-hidden rounded-full bg-ink-800">
-          <div className="h-full w-1/3 animate-pulse rounded-full bg-accent-500" />
+          <div className="h-full w-1/3 animate-pulse rounded-full bg-ink-100" />
         </div>
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
@@ -219,7 +214,7 @@ function BusyBlock() {
 
 function PreviewBlock({ url }: { url: string }) {
   return (
-    <section className="overflow-hidden rounded-3xl border border-ink-700 bg-ink-900/60 p-5 backdrop-blur">
+    <section className="overflow-hidden rounded-2xl border border-ink-800 bg-ink-900 p-5">
       <h3 className="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-ink-300">
         Source
       </h3>
@@ -231,7 +226,7 @@ function PreviewBlock({ url }: { url: string }) {
 
 function ModelBlock({ versions }: { versions: Record<string, string> }) {
   return (
-    <section className="rounded-3xl border border-ink-700 bg-ink-900/60 p-5 backdrop-blur">
+    <section className="rounded-2xl border border-ink-800 bg-ink-900 p-5">
       <h3 className="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-ink-300">
         Models in use
       </h3>
@@ -249,7 +244,7 @@ function ModelBlock({ versions }: { versions: Record<string, string> }) {
 
 function PrivacyBlock() {
   return (
-    <section className="rounded-3xl border border-ink-700 bg-ink-900/60 p-5 backdrop-blur">
+    <section className="rounded-2xl border border-ink-800 bg-ink-900 p-5">
       <h3 className="mb-2 text-sm font-semibold uppercase tracking-[0.2em] text-ink-300">
         Privacy
       </h3>
@@ -305,9 +300,9 @@ function FeatureGrid() {
         {items.map((it) => (
           <article
             key={it.h}
-            className="rounded-2xl border border-ink-700 bg-ink-900/60 p-5 transition hover:border-accent-600 hover:shadow-glow"
+            className="rounded-2xl border border-ink-800 bg-ink-900 p-5 transition hover:border-ink-600"
           >
-            <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-accent-400">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink-400">
               {it.d}
             </div>
             <h3 className="mt-2 text-lg font-semibold text-ink-50">{it.h}</h3>

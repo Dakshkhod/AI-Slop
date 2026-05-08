@@ -109,7 +109,7 @@ export function ForensicTrail({
 
   if (!hasStructured && !hasLegacy) {
     return (
-      <section className="rounded-3xl border border-ink-700 bg-ink-900/60 p-5 backdrop-blur">
+      <section className="rounded-2xl border border-ink-800 bg-ink-900 p-5">
         <h3 className="mb-2 text-sm font-semibold uppercase tracking-[0.2em] text-ink-300">
           Forensic trail
         </h3>
@@ -121,7 +121,7 @@ export function ForensicTrail({
   }
 
   return (
-    <section className="rounded-3xl border border-ink-700 bg-ink-900/60 p-5 backdrop-blur">
+    <section className="rounded-2xl border border-ink-800 bg-ink-900 p-5">
       <h3 className="mb-4 text-sm font-semibold uppercase tracking-[0.2em] text-ink-300">
         Forensic trail
       </h3>
@@ -136,7 +136,7 @@ export function ForensicTrail({
         <ol className="space-y-2 text-sm text-ink-100">
           {legacyItems!.map((line, i) => (
             <li key={i} className="flex gap-3">
-              <span className="font-mono text-xs text-accent-400">
+              <span className="font-mono text-xs text-ink-400">
                 {String(i + 1).padStart(2, "0")}
               </span>
               <span className="flex-1">{line}</span>

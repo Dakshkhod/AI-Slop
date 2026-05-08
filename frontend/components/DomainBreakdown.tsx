@@ -38,7 +38,7 @@ const LABELS: Record<keyof DBT, { label: string; hint: string; color: string }> 
 export function DomainBreakdown({ data }: { data: DBT }) {
   const entries = Object.entries(data) as [keyof DBT, number][];
   return (
-    <section className="rounded-3xl border border-ink-700 bg-ink-900/60 p-5 backdrop-blur">
+    <section className="rounded-2xl border border-ink-800 bg-ink-900 p-5">
       <h3 className="mb-4 text-sm font-semibold uppercase tracking-[0.2em] text-ink-300">
         Per-domain real confidence
       </h3>

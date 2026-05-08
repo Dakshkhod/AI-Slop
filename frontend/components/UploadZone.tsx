@@ -35,11 +35,11 @@ export function UploadZone({ onFile, onUrl, busy }: Props) {
         onDrop={handleDrop}
         onClick={() => !busy && inputRef.current?.click()}
         className={[
-          "group relative cursor-pointer rounded-3xl border-2 border-dashed p-10 text-center transition",
-          "bg-ink-900/40 backdrop-blur",
+          "group relative cursor-pointer rounded-2xl border-2 border-dashed p-10 text-center transition",
+          "bg-ink-900",
           drag
-            ? "border-accent-500 shadow-glow"
-            : "border-ink-700 hover:border-accent-600 hover:shadow-glow",
+            ? "border-ink-100"
+            : "border-ink-700 hover:border-ink-500",
           busy ? "opacity-60 cursor-not-allowed" : "",
         ].join(" ")}
       >
@@ -53,25 +53,24 @@ export function UploadZone({ onFile, onUrl, busy }: Props) {
             if (f) onFile(f);
           }}
         />
-        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-ink-800 text-accent-400 ring-1 ring-ink-700 group-hover:ring-accent-600">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-ink-700 bg-ink-800 text-ink-200">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
             <path d="M12 16V4M12 4l-4 4M12 4l4 4" />
             <rect x="4" y="16" width="16" height="4" rx="1.5" />
           </svg>
         </div>
-        <h3 className="text-xl font-semibold tracking-tight text-ink-50">
+        <h3 className="text-lg font-semibold tracking-tight text-ink-50">
           Drop an image, video, or audio file
         </h3>
-        <p className="mx-auto mt-1 max-w-md text-sm text-ink-300">
+        <p className="mx-auto mt-1 max-w-md text-[13px] text-ink-400">
           Or click to browse. JPG / PNG / WebP / MP4 / MOV / WAV / MP3 — up to 50 MB.
-          Files are analysed in-memory and never stored.
         </p>
       </div>
 
-      <div className="flex items-center gap-3 text-xs uppercase tracking-widest text-ink-400">
-        <div className="h-px flex-1 bg-ink-700" />
+      <div className="flex items-center gap-3 text-[10px] uppercase tracking-[0.2em] text-ink-500">
+        <div className="h-px flex-1 bg-ink-800" />
         or analyse a URL
-        <div className="h-px flex-1 bg-ink-700" />
+        <div className="h-px flex-1 bg-ink-800" />
       </div>
 
       <form
@@ -86,13 +85,13 @@ export function UploadZone({ onFile, onUrl, busy }: Props) {
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           placeholder="https://example.com/photo.jpg"
-          className="flex-1 rounded-xl border border-ink-700 bg-ink-900/60 px-4 py-3 text-ink-50 placeholder:text-ink-400 focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500/40"
+          className="flex-1 rounded-lg border border-ink-700 bg-ink-900 px-4 py-2.5 text-sm text-ink-50 placeholder:text-ink-500 focus:border-ink-500 focus:outline-none"
           disabled={busy}
         />
         <button
           type="submit"
           disabled={busy || !url.trim()}
-          className="rounded-xl bg-accent-500 px-5 py-3 font-semibold text-ink-950 transition hover:bg-accent-400 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-lg bg-ink-100 px-5 py-2.5 text-sm font-semibold text-black transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
         >
           Analyse
         </button>
