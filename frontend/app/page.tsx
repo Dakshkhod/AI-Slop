@@ -64,7 +64,7 @@ export default function HomePage() {
     <main className="min-h-screen">
       <Header />
 
-      <div className="mx-auto max-w-6xl px-6 pb-24">
+      <div className="mx-auto max-w-6xl px-4 pb-24 sm:px-6">
         <Hero />
 
         <div className="mt-10">
@@ -135,7 +135,7 @@ export default function HomePage() {
 function Header() {
   return (
     <header className="sticky top-0 z-10 border-b border-ink-800 bg-black/80 backdrop-blur">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
+      <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
         <div className="flex items-center gap-2.5">
           <div className="grid h-7 w-7 place-content-center rounded-lg border border-ink-700 bg-ink-900">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#e5e5e5" strokeWidth="2">
@@ -160,14 +160,14 @@ function Header() {
 
 function Hero() {
   return (
-    <section className="mt-16 text-center">
+    <section className="mt-12 text-center sm:mt-16">
       <span className="inline-flex items-center gap-2 rounded-full border border-ink-700 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.18em] text-ink-300">
         Multi-modal · Explainable · Physics-based
       </span>
-      <h1 className="mx-auto mt-5 max-w-3xl text-balance text-4xl font-semibold tracking-tight text-ink-50 md:text-5xl">
+      <h1 className="mx-auto mt-5 max-w-3xl text-balance text-3xl font-semibold tracking-tight text-ink-50 sm:text-4xl md:text-5xl">
         Detect AI slop across images, video, and audio.
       </h1>
-      <p className="mx-auto mt-4 max-w-xl text-pretty text-[15px] leading-relaxed text-ink-300">
+      <p className="mx-auto mt-4 max-w-xl text-pretty text-sm leading-relaxed text-ink-300 sm:text-[15px]">
         A 6-layer pipeline grounded in physics, not pixel-guessing. Every flag is
         explained — you see <em>why</em>, not just <em>what</em>.
       </p>

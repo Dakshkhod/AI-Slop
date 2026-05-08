@@ -78,7 +78,7 @@ export function UploadZone({ onFile, onUrl, busy }: Props) {
           e.preventDefault();
           if (url.trim() && !busy) onUrl(url.trim());
         }}
-        className="flex gap-2"
+        className="flex flex-col gap-2 sm:flex-row"
       >
         <input
           type="url"

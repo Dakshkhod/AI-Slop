@@ -76,20 +76,20 @@ export function ProvenanceCard({ trail }: { trail: TrailItem[] }) {
             <dl className="mt-2 space-y-1 rounded-xl bg-ink-950/50 p-3 font-mono text-xs">
               {c2pa.issuer && (
                 <div className="flex gap-2">
-                  <dt className="text-ink-500">Issuer:</dt>
-                  <dd className="text-ink-200">{c2pa.issuer}</dd>
+                  <dt className="shrink-0 text-ink-500">Issuer:</dt>
+                  <dd className="min-w-0 break-all text-ink-200">{c2pa.issuer}</dd>
                 </div>
               )}
               {c2pa.claim_generator && (
                 <div className="flex gap-2">
-                  <dt className="text-ink-500">Generator:</dt>
-                  <dd className="text-ink-200">{c2pa.claim_generator}</dd>
+                  <dt className="shrink-0 text-ink-500">Generator:</dt>
+                  <dd className="min-w-0 break-all text-ink-200">{c2pa.claim_generator}</dd>
                 </div>
               )}
               {c2pa.assertions && c2pa.assertions.length > 0 && (
                 <div className="flex gap-2">
-                  <dt className="text-ink-500">Assertions:</dt>
-                  <dd className="text-ink-200">{c2pa.assertions.join(", ")}</dd>
+                  <dt className="shrink-0 text-ink-500">Assertions:</dt>
+                  <dd className="min-w-0 break-all text-ink-200">{c2pa.assertions.join(", ")}</dd>
                 </div>
               )}
             </dl>

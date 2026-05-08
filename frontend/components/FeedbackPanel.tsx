@@ -91,7 +91,7 @@ export default function FeedbackPanel({ result, sourceFile, sourceUrl }: Props) 
       </div>
 
       {stage === "idle" && (
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row">
           <button
             onClick={onThumbsUp}
             className="flex-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-sm font-medium text-emerald-300 transition hover:bg-emerald-500/20"
@@ -123,7 +123,7 @@ export default function FeedbackPanel({ result, sourceFile, sourceUrl }: Props) 
             What is it actually? This correction is saved as ground truth
             and the model is retrained on it.
           </p>
-          <div className="flex gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row">
             <button
               onClick={() => onSubmitCorrection("real")}
               className="flex-1 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-sm font-medium text-cyan-200 transition hover:bg-cyan-500/20"

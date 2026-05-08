@@ -64,14 +64,14 @@ export function ScoreCard({ result }: { result: AnalyzeResponse }) {
   const ringColor = verdictRingColor(result.verdict);
   return (
     <section className="rounded-2xl border border-ink-800 bg-ink-900 p-6">
-      <div className="flex flex-col items-start gap-6 md:flex-row md:items-center">
+      <div className="flex flex-col items-center gap-6 md:flex-row md:items-center">
         <ConfidenceArc
           score={result.score}
           uncertainty={result.score_uncertainty}
           color={ringColor}
         />
-        <div className="flex-1">
-          <div className="flex items-center gap-2">
+        <div className="w-full flex-1">
+          <div className="flex flex-wrap items-center justify-center gap-2 md:justify-start">
             <span
               className={`text-[11px] font-semibold uppercase tracking-[0.2em] ${verdictColor(
                 result.verdict
@@ -83,10 +83,10 @@ export function ScoreCard({ result }: { result: AnalyzeResponse }) {
               {result.modality}
             </span>
           </div>
-          <h2 className="mt-2 text-2xl font-semibold tracking-tight text-ink-50">
+          <h2 className="mt-2 text-center text-2xl font-semibold tracking-tight text-ink-50 md:text-left">
             {result.verdict_label}
           </h2>
-          <p className="mt-2 max-w-prose text-sm leading-relaxed text-ink-300">
+          <p className="mt-2 max-w-prose text-center text-sm leading-relaxed text-ink-300 md:text-left">
             {pct}% probability AI-generated, fused from {result.signals.length} signals across 6 detection layers.
           </p>
           <dl className="mt-5 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">

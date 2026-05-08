@@ -33,7 +33,7 @@ function TrailRow({ item, index }: { item: TrailItem; index: number }) {
   const hasEvidence = Object.keys(item.evidence ?? {}).length > 0;
 
   return (
-    <li className="rounded-2xl border border-ink-700/60 bg-ink-900/40 p-4 transition hover:border-ink-600">
+    <li className="rounded-2xl border border-ink-700/60 bg-ink-900/40 p-3 transition hover:border-ink-600 sm:p-4">
       <button
         className="w-full text-left"
         onClick={() => hasEvidence && setOpen((v) => !v)}
@@ -86,7 +86,7 @@ function TrailRow({ item, index }: { item: TrailItem; index: number }) {
               return (
                 <div key={k} className="flex gap-2 font-mono text-xs">
                   <dt className="shrink-0 text-ink-500">{k}:</dt>
-                  <dd className="break-all whitespace-pre-wrap text-ink-300">{display}</dd>
+                  <dd className="min-w-0 break-all whitespace-pre-wrap text-ink-300">{display}</dd>
                 </div>
               );
             })}

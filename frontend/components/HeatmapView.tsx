@@ -14,7 +14,7 @@ export function HeatmapView({ heatmaps }: { heatmaps: Heatmap[] }) {
           Visual evidence
         </h3>
         {heatmaps.length > 1 && (
-          <div className="flex gap-1">
+          <div className="flex flex-wrap gap-1">
             {heatmaps.map((_, i) => (
               <button
                 key={i}
