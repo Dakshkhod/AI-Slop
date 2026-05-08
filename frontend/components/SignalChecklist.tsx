@@ -35,10 +35,7 @@ function Bar({ value }: { value: number }) {
 export function SignalChecklist({ signals }: { signals: SignalResult[] }) {
   const [open, setOpen] = useState<string | null>(null);
   return (
-    <section className="rounded-3xl border border-ink-700 bg-ink-900/60 p-5 backdrop-blur">
-      <h3 className="mb-4 text-sm font-semibold uppercase tracking-[0.2em] text-ink-300">
-        Signal checklist · {signals.length} checks
-      </h3>
+    <section className="p-3">
       <ul className="space-y-2">
         {signals.map((s) => {
           const sev = s.error ? "info" : s.severity;

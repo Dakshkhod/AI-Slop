@@ -8,6 +8,7 @@ import { ProvenanceCard } from "@/components/ProvenanceCard";
 import { ScoreCard } from "@/components/ScoreCard";
 import { SignalChecklist } from "@/components/SignalChecklist";
 import { UploadZone } from "@/components/UploadZone";
+import { VerdictSummary } from "@/components/VerdictSummary";
 import { AnalyzeResponse, analyzeFile, analyzeUrl } from "@/lib/api";
 import { useState } from "react";
 
@@ -81,6 +82,8 @@ export default function HomePage() {
           <div className="mt-10 space-y-6">
             <ScoreCard result={result} />
 
+            <VerdictSummary signals={result.signals} />
+
             <div className="grid gap-6 lg:grid-cols-5">
               <div className="space-y-6 lg:col-span-3">
                 {result.heatmaps?.length ? (
@@ -92,7 +95,25 @@ export default function HomePage() {
                   items={result.provenance_trail}
                   legacyItems={result.forensic_trail}
                 />
-                <SignalChecklist signals={result.signals} />
+                <details className="group rounded-3xl border border-ink-700 bg-ink-900/40 backdrop-blur">
+                  <summary className="flex cursor-pointer items-center justify-between p-5 text-sm font-semibold uppercase tracking-[0.2em] text-ink-300 hover:text-ink-100">
+                    All {result.signals.length} signals (technical)
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      className="transition group-open:rotate-180"
+                    >
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  </summary>
+                  <div className="border-t border-ink-700/60 p-2">
+                    <SignalChecklist signals={result.signals} />
+                  </div>
+                </details>
               </div>
               <div className="space-y-6 lg:col-span-2">
                 <ProvenanceCard trail={result.provenance_trail ?? []} />
@@ -160,12 +181,38 @@ function Hero() {
 }
 
 function BusyBlock() {
+  const stages = [
+    "Reverse search",
+    "Metadata & EXIF",
+    "Physics signals",
+    "ML classifiers",
+    "Biological coherence",
+    "Bayesian fusion",
+  ];
   return (
-    <div className="mt-8 overflow-hidden rounded-3xl border border-ink-700 bg-ink-900/60 p-6 text-center">
-      <div className="mx-auto h-1.5 w-48 overflow-hidden rounded-full bg-ink-800">
-        <div className="h-full w-1/3 animate-pulse rounded-full bg-accent-500" />
+    <div className="mt-8 overflow-hidden rounded-3xl border border-ink-700 bg-ink-900/60 p-6">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium text-ink-100">
+          Running 6-layer pipeline…
+        </p>
+        <div className="h-1.5 w-32 overflow-hidden rounded-full bg-ink-800">
+          <div className="h-full w-1/3 animate-pulse rounded-full bg-accent-500" />
+        </div>
       </div>
-      <p className="mt-3 text-sm text-ink-300">Running 6-layer pipeline…</p>
+      <div className="mt-4 flex flex-wrap gap-2">
+        {stages.map((s, i) => (
+          <span
+            key={s}
+            className="rounded-full border border-ink-700 bg-ink-800/60 px-2.5 py-1 text-[11px] text-ink-300"
+            style={{ animation: `pulse 1.4s ease-in-out ${i * 0.15}s infinite` }}
+          >
+            {s}
+          </span>
+        ))}
+      </div>
+      <p className="mt-3 text-xs text-ink-400">
+        Cold-start may take ~30s while ML models load. Cached images return instantly.
+      </p>
     </div>
   );
 }
