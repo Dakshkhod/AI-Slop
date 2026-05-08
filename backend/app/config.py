@@ -33,6 +33,8 @@ class Settings(BaseSettings):
             "chrome-extension://*",
         ]
     )
+    # Production frontend URL (set to your Vercel deployment URL)
+    frontend_url: Optional[str] = None
     max_upload_mb: int = 50
     request_timeout_s: int = 120
 
