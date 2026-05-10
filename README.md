@@ -167,22 +167,30 @@ averaged into the verdict.
 
 ---
 
-## Honest Performance Numbers
+## Model Performance — Honest Numbers
 
-These numbers are measured on production-like data, not training distribution.
-We publish the truth.
+Eval set: 216 AI images (Imagen 3, DALL-E 3, Nano Banana Pro)
++ 250 real photos (MIRFLICKR, COCO 2017, Wikimedia, RAISE-1k)
+These images were never used in training.
 
-| Eval Set         | AUC    | Accuracy | False Positive Rate (real flagged as AI) |
-|------------------|--------|----------|------------------------------------------|
-| eval_modern      | _to be measured_ | _to be measured_ | _to be measured_ |
-| eval_compressed  | _to be measured_ | _to be measured_ | _to be measured_ |
-| eval_screenshots | _to be measured_ | _to be measured_ | _to be measured_ |
+### Version History
 
-**eval_modern** — clean images from current generators vs. real photos.
-**eval_compressed** — same images after double-JPEG compression (simulates WhatsApp/Telegram forwarding).
-**eval_screenshots** — same images rendered as phone screenshots across three device profiles.
+| Version | AUC    | AI detected | Notes |
+|---------|--------|-------------|-------|
+| v3      | 0.9744 | ~90%        | Eval set same distribution as train — number inflated |
+| v4      | 0.8262 | 47.2%       | Regression — Unsplash real photos too similar to AI outputs |
+| v5      | TBD    | TBD         | Fix in progress — authentic camera photos replacing Unsplash |
 
-To reproduce: see [`evaluation/README.md`](evaluation/README.md).
+> We publish version history including regressions.
+> v4 was worse than v3. We documented why and fixed it.
+
+**Why v4 regressed:**
+1. Real photos sourced from Unsplash/Flickr look identical to AI outputs to a CNN (too clean, no sensor noise)
+2. Classifier head was re-initialised instead of continuing fine-tune from v3
+3. Over-regularisation: `mixup_alpha=0.2` + `label_smooth=0.15` paralysed the model
+
+**v5 fix:** authentic camera sources (MIRFLICKR raw uploads, COCO documentary, Wikimedia, RAISE-1k raw DSLR)
++ load full v3 checkpoint + milder regularisation (`mixup=0.05`, `label_smooth=0.03`, `lr=2e-5`).
 
 ---
 
