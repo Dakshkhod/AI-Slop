@@ -16,8 +16,8 @@ from PIL import Image
 from torchvision import transforms
 
 _BASE = Path(__file__).resolve().parents[2]
-_CHECKPOINT_PATH = _BASE / "best_model_v4.pth"
-_T_PATH = _BASE / "T.json"
+_CHECKPOINT_PATH = _BASE / "best_model_v5.pth"   # updated from v4 → v5
+_T_PATH = _BASE / "T.json"                        # same filename, new calibration
 with open(_T_PATH, encoding="utf-8") as f:
     _T = float(json.load(f)["temperature"])
 log = logging.getLogger(__name__)
@@ -102,7 +102,7 @@ def get_model() -> TruthLensModel:
         if is_windows:
             pathlib.PosixPath = _saved_posix  # type: ignore[misc]
     state_dict = ckpt["model_state"] if isinstance(ckpt, dict) and "model_state" in ckpt else ckpt
-    log.info("Loaded v4 checkpoint: %s", _CHECKPOINT_PATH.name)
+    log.info("Loaded v5 checkpoint: %s", _CHECKPOINT_PATH.name)
 
     model = TruthLensModel()
     model.load_state_dict(state_dict)
