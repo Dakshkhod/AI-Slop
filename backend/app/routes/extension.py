@@ -4,18 +4,14 @@ Three endpoints used exclusively by the browser extension badge scanner:
 
   POST /api/check_hash   — instant cache lookup by perceptual hash
   POST /api/analyze_url  — fetch + analyse an image URL, cache by phash
-  POST /api/report_wrong — log a wrong-verdict report to JSONL
+  POST /api/report_wrong — log a wrong-verdict report to PostgreSQL (Neon)
 """
 
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import os
-from collections import defaultdict
-from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -25,6 +21,14 @@ from pydantic import BaseModel
 from ..config import get_settings
 from ..pipeline.orchestrator import analyze as run_pipeline
 from ..schemas import Modality
+from ..utils.feedback_db import (
+    get_reports,
+    get_stats,
+    is_duplicate,
+    save_admin_verify,
+    save_feedback_rating,
+    save_report_wrong,
+)
 from ..utils.io import detect_modality
 from ..utils.phash_cache import get_by_phash, put
 
@@ -33,20 +37,13 @@ router = APIRouter(prefix="/api", tags=["extension"])
 
 
 def _hash_reporter(request: Request) -> str:
-    """Stable opaque ID per reporter — so we can detect duplicate reports
-    from the same person without storing their actual IP. SHA-256(ip + ua)
-    truncated to 16 chars. Behind a proxy this falls back to X-Forwarded-For.
-    """
     fwd = request.headers.get("x-forwarded-for", "")
     ip = fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else "")
     ua = request.headers.get("user-agent", "")
-    h = hashlib.sha256(f"{ip}|{ua}".encode("utf-8")).hexdigest()
-    return h[:16]
+    return hashlib.sha256(f"{ip}|{ua}".encode()).hexdigest()[:16]
 
 
 def _check_admin(token: Optional[str]) -> None:
-    """Bearer-token guard for review endpoints. Set TRUTHLENS_ADMIN_TOKEN
-    in the backend env. If unset, the endpoints are disabled (403)."""
     expected = os.getenv("TRUTHLENS_ADMIN_TOKEN", "").strip()
     if not expected:
         raise HTTPException(status_code=403, detail="Admin review disabled — set TRUTHLENS_ADMIN_TOKEN")
@@ -57,10 +54,6 @@ def _check_admin(token: Optional[str]) -> None:
 
 
 def _is_admin(token: Optional[str]) -> bool:
-    """Non-throwing version of _check_admin — returns True if the bearer
-    token matches TRUTHLENS_ADMIN_TOKEN. Used to optionally elevate trust
-    on regular feedback endpoints when the maintainer is signed in.
-    """
     expected = os.getenv("TRUTHLENS_ADMIN_TOKEN", "").strip()
     if not expected or not token or not token.startswith("Bearer "):
         return False
@@ -84,31 +77,25 @@ class AnalyzeUrlRequest(BaseModel):
 class ReportWrongRequest(BaseModel):
     phash: str
     image_url: str = ""
-    user_verdict: str          # "real" or "ai" — what the user says it actually is
+    user_verdict: str
     system_verdict: Dict[str, Any] = {}
-    comment: str = ""          # optional free-text reason
+    comment: str = ""
     filename: str = ""
     file_size: int = 0
-    request_id: str = ""       # links the feedback to the original analyze request
+    request_id: str = ""
 
 
 class FeedbackRequest(BaseModel):
-    """Generic feedback: thumbs-up/down on the verdict.
-
-    For thumbs-down, prefer /report_wrong which captures the corrected
-    label. This endpoint is for confirming the system was right (thumbs-up)
-    or for low-friction "I disagree" without specifying the correct label.
-    """
     request_id: str
     phash: str = ""
     image_url: str = ""
-    rating: str                # "up" (correct) or "down" (wrong)
+    rating: str
     system_verdict: Dict[str, Any] = {}
     comment: str = ""
 
 
 # ---------------------------------------------------------------------------
-# Background task: fetch and analyse an image URL, cache the result
+# Background task
 # ---------------------------------------------------------------------------
 
 async def _background_analyze(phash: str, image_url: str) -> None:
@@ -147,11 +134,6 @@ async def check_hash(
     body: CheckHashRequest,
     background_tasks: BackgroundTasks,
 ) -> Dict[str, Any]:
-    """Look up the perceptual hash in the cache.
-
-    - Hit  → returns the cached verdict immediately.
-    - Miss → queues a background fetch-and-analyse task, returns {"status": "queued"}.
-    """
     if not body.phash:
         raise HTTPException(status_code=400, detail="phash is required")
 
@@ -167,16 +149,9 @@ async def check_hash(
 
 @router.post("/analyze_url")
 async def analyze_image_url(body: AnalyzeUrlRequest) -> Dict[str, Any]:
-    """Fetch an image URL, run full analysis, cache by phash, return verdict.
-
-    Synchronous — the caller waits for the result. Use this when you need an
-    immediate verdict (e.g. the extension called check_hash and got "queued",
-    then polls here, or simply calls here directly for the badge).
-    """
     if not body.image_url:
         raise HTTPException(status_code=400, detail="image_url is required")
 
-    # Check cache first (avoid redundant pipeline runs)
     if body.phash:
         cached = get_by_phash(body.phash)
         if cached is not None:
@@ -187,9 +162,7 @@ async def analyze_image_url(body: AnalyzeUrlRequest) -> Dict[str, Any]:
         async with httpx.AsyncClient(
             timeout=settings.request_timeout_s, follow_redirects=True
         ) as client:
-            r = await client.get(
-                body.image_url, headers={"User-Agent": "TruthLens/0.1"}
-            )
+            r = await client.get(body.image_url, headers={"User-Agent": "TruthLens/0.1"})
             r.raise_for_status()
             raw = r.content
             content_type = r.headers.get("content-type", "")
@@ -209,7 +182,6 @@ async def analyze_image_url(body: AnalyzeUrlRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"Analysis failed: {exc}")
 
     result_dict = result.model_dump()
-
     if body.phash:
         put(body.phash, body.image_url, result_dict)
 
@@ -226,17 +198,6 @@ async def analyze_image_url(body: AnalyzeUrlRequest) -> Dict[str, Any]:
     }
 
 
-_ALLOWED_IMG_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tiff", ".heic"}
-
-
-def _safe_ext(filename: str, fallback: str = ".jpg") -> str:
-    """Return a safe lowercase extension for the saved image, or fallback."""
-    if not filename:
-        return fallback
-    p = Path(filename).suffix.lower()
-    return p if p in _ALLOWED_IMG_EXT else fallback
-
-
 @router.post("/report_wrong")
 async def report_wrong(
     request: Request,
@@ -247,73 +208,30 @@ async def report_wrong(
     file_size: int = Form(0),
     request_id: str = Form(""),
     comment: str = Form(""),
-    system_verdict: str = Form("{}"),    # JSON-encoded dict
+    system_verdict: str = Form("{}"),
     file: Optional[UploadFile] = File(None),
 ) -> Dict[str, Any]:
-    """Append a 'this verdict was wrong' correction to hard_negatives.jsonl
-    AND save the image bytes to backend/_data/feedback_images/ so the
-    retrain pipeline has actual pixels to learn from.
-
-    Multipart form (so the original image can ride along):
-      - file:           the image bytes (recommended; required for retrain)
-      - user_verdict:   'real' or 'ai'
-      - phash, image_url, filename, file_size, request_id, comment,
-        system_verdict (JSON string)
-
-    TESTING-PHASE BEHAVIOUR: every correction is treated as ground truth
-    and auto-promoted to status='verified'. Re-enable consensus / admin
-    gating by reverting this function when opening to public users.
-    """
     if user_verdict not in ("real", "ai"):
         raise HTTPException(status_code=400, detail="user_verdict must be 'real' or 'ai'")
 
+    import json
     try:
         sys_verdict_obj = json.loads(system_verdict) if system_verdict else {}
     except Exception:
         sys_verdict_obj = {}
 
-    settings = get_settings()
-    reports_path = settings.data_dir / "hard_negatives.jsonl"
-    images_dir = settings.data_dir / "feedback_images"
-    reports_path.parent.mkdir(parents=True, exist_ok=True)
-    images_dir.mkdir(parents=True, exist_ok=True)
     reporter = _hash_reporter(request)
 
-    # Dedup: same (phash, user_verdict) from same reporter — return
-    # already_reported so the UI can show a clean "already saved" state.
-    if phash:
-        try:
-            with open(reports_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    try:
-                        obj = json.loads(line)
-                    except Exception:
-                        continue
-                    if (obj.get("type") == "report_wrong"
-                            and obj.get("phash") == phash
-                            and obj.get("reporter") == reporter
-                            and obj.get("user_verdict") == user_verdict):
-                        return {
-                            "status": "already_reported",
-                            "phash": phash,
-                            "message": "Already saved.",
-                        }
-        except FileNotFoundError:
-            pass
+    if is_duplicate(phash, user_verdict, reporter):
+        return {"status": "already_reported", "phash": phash, "message": "Already saved."}
 
-    # Save the image bytes if provided. Filename: <user_verdict>/<phash>.<ext>
-    # so retraining can scoop a folder per class. Falls back to UUID if no
-    # phash. We also try to fetch image_url server-side if no file uploaded.
-    saved_image_path: Optional[str] = None
+    # Read image bytes if provided
     image_bytes: Optional[bytes] = None
     if file is not None:
         try:
-            image_bytes = await file.read()
-            if not image_bytes:
-                image_bytes = None
+            image_bytes = await file.read() or None
         except Exception as exc:
             log.warning("Could not read uploaded feedback image: %s", exc)
-            image_bytes = None
     elif image_url:
         try:
             async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
@@ -323,101 +241,51 @@ async def report_wrong(
         except Exception as exc:
             log.warning("Could not fetch feedback image_url: %s", exc)
 
-    if image_bytes:
-        # Refuse anything implausibly large (>50MB) — same cap as analyze
-        if len(image_bytes) > 50 * 1024 * 1024:
-            raise HTTPException(status_code=413, detail="Feedback image too large (max 50MB)")
-        ext = _safe_ext(filename, fallback=_safe_ext((file.filename if file else "") or "", ".jpg"))
-        # Compute a content hash so we never overwrite a different image
-        # that happens to share the same phash.
-        content_hash = hashlib.sha256(image_bytes).hexdigest()[:16]
-        stem = phash or content_hash
-        class_dir = images_dir / user_verdict
-        class_dir.mkdir(parents=True, exist_ok=True)
-        out_path = class_dir / f"{stem}_{content_hash}{ext}"
-        try:
-            with open(out_path, "wb") as f:
-                f.write(image_bytes)
-            saved_image_path = str(out_path.relative_to(settings.data_dir))
-        except Exception as exc:
-            log.error("Could not save feedback image: %s", exc)
-
-    now = datetime.now(timezone.utc).isoformat()
-    entry = {
-        "type": "report_wrong",
-        "status": "verified",
-        "phash": phash,
-        "image_url": image_url,
-        "filename": filename,
-        "file_size": file_size or (len(image_bytes) if image_bytes else 0),
-        "user_verdict": user_verdict,
-        "system_verdict": sys_verdict_obj,
-        "comment": comment[:500] if comment else "",
-        "request_id": request_id,
-        "reporter": reporter,
-        "image_path": saved_image_path,    # relative to data_dir; None if image not stored
-        "reported_at": now,
-    }
-    marker = {
-        "type": "admin_verified",
-        "status": "verified",
-        "phash": phash,
-        "user_verdict": user_verdict,
-        "image_path": saved_image_path,
-        "note": (comment or "")[:500] or "Verified via UI feedback",
-        "verified_at": now,
-    }
+    if image_bytes and len(image_bytes) > 50 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Feedback image too large (max 50MB)")
 
     try:
-        with open(reports_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry) + "\n")
-            f.write(json.dumps(marker) + "\n")
+        save_report_wrong(
+            phash=phash,
+            image_url=image_url,
+            filename=filename,
+            file_size=file_size or (len(image_bytes) if image_bytes else 0),
+            user_verdict=user_verdict,
+            system_verdict=sys_verdict_obj,
+            comment=comment,
+            request_id=request_id,
+            reporter=reporter,
+            image_data=image_bytes,
+        )
     except Exception as exc:
-        log.error("Failed to write report: %s", exc)
+        log.error("Failed to save report: %s", exc)
         raise HTTPException(status_code=500, detail="Could not save report")
 
     return {
         "status": "verified",
-        "image_saved": saved_image_path is not None,
-        "image_path": saved_image_path,
+        "image_saved": image_bytes is not None,
+        "image_path": None,
         "message": "Saved — will enter the next training cycle.",
     }
 
 
 @router.post("/feedback")
 async def feedback(body: FeedbackRequest, request: Request) -> Dict[str, Any]:
-    """Log a thumbs-up/down rating on a verdict.
-
-    Same trust caveat as /report_wrong — these are signals for review,
-    not training labels. Thumbs-up is the easier win (system was right
-    AND the user agrees) and gets less weight per entry; a single
-    thumbs-down with no correction goes to the review queue.
-    """
     if body.rating not in ("up", "down"):
         raise HTTPException(status_code=400, detail="rating must be 'up' or 'down'")
 
-    settings = get_settings()
-    reports_path = settings.data_dir / "hard_negatives.jsonl"
-    reports_path.parent.mkdir(parents=True, exist_ok=True)
-
-    entry = {
-        "type": f"feedback_{body.rating}",
-        "status": "reported",
-        "rating": body.rating,
-        "request_id": body.request_id,
-        "phash": body.phash,
-        "image_url": body.image_url,
-        "system_verdict": body.system_verdict,
-        "comment": (body.comment or "")[:500],
-        "reporter": _hash_reporter(request),
-        "reported_at": datetime.now(timezone.utc).isoformat(),
-    }
-
     try:
-        with open(reports_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry) + "\n")
+        save_feedback_rating(
+            request_id=body.request_id,
+            phash=body.phash,
+            image_url=body.image_url,
+            rating=body.rating,
+            system_verdict=body.system_verdict,
+            comment=body.comment or "",
+            reporter=_hash_reporter(request),
+        )
     except Exception as exc:
-        log.error("Failed to write feedback: %s", exc)
+        log.error("Failed to save feedback: %s", exc)
         raise HTTPException(status_code=500, detail="Could not save feedback")
 
     return {"status": "recorded", "rating": body.rating}
@@ -425,115 +293,24 @@ async def feedback(body: FeedbackRequest, request: Request) -> Dict[str, Any]:
 
 @router.get("/feedback/stats")
 async def feedback_stats() -> Dict[str, Any]:
-    """Aggregate counts — for transparency in UI."""
-    settings = get_settings()
-    reports_path = settings.data_dir / "hard_negatives.jsonl"
-    counts = {
-        "total": 0,
-        "report_wrong": 0,
-        "feedback_up": 0,
-        "feedback_down": 0,
-        "verified": 0,
-        "consensus": 0,
-    }
-    if not reports_path.exists():
-        return counts
     try:
-        per_phash: Dict[str, set] = defaultdict(set)
-        with open(reports_path, "r", encoding="utf-8") as f:
-            for line in f:
-                try:
-                    obj = json.loads(line)
-                except Exception:
-                    continue
-                counts["total"] += 1
-                t = obj.get("type", "report_wrong")
-                if t in counts:
-                    counts[t] += 1
-                if obj.get("status") == "verified":
-                    counts["verified"] += 1
-                if obj.get("type") == "report_wrong" and obj.get("phash"):
-                    per_phash[obj["phash"]].add(obj.get("reporter", ""))
-        counts["consensus"] = sum(1 for s in per_phash.values() if len(s) >= 3)
+        return get_stats()
     except Exception as exc:
-        log.warning("feedback_stats read failed: %s", exc)
-    return counts
+        log.warning("feedback_stats failed: %s", exc)
+        return {"total": 0, "report_wrong": 0, "feedback_up": 0, "feedback_down": 0, "verified": 0, "consensus": 0}
 
 
 # ---------------------------------------------------------------------------
-# Admin review endpoints — bearer-token gated. Set TRUTHLENS_ADMIN_TOKEN
-# in the backend env to enable. Use these to manually verify reports
-# before they enter the training set.
+# Admin endpoints — bearer-token gated (set TRUTHLENS_ADMIN_TOKEN in env)
 # ---------------------------------------------------------------------------
-
 
 @router.get("/admin/review")
 async def admin_review(
     authorization: Optional[str] = Header(default=None),
     min_agree: int = 1,
 ) -> Dict[str, Any]:
-    """List pending reports grouped by phash, sorted by agreement count.
-
-    `min_agree=1` returns everything; `min_agree=3` returns only
-    consensus-level candidates ready for verification.
-    """
     _check_admin(authorization)
-    settings = get_settings()
-    reports_path = settings.data_dir / "hard_negatives.jsonl"
-    if not reports_path.exists():
-        return {"items": []}
-
-    grouped: Dict[str, Dict[str, Any]] = {}
-    try:
-        with open(reports_path, "r", encoding="utf-8") as f:
-            for line in f:
-                try:
-                    obj = json.loads(line)
-                except Exception:
-                    continue
-                if obj.get("type") != "report_wrong":
-                    continue
-                phash = obj.get("phash") or "no_phash_" + obj.get("request_id", "")
-                key = f"{phash}:{obj.get('user_verdict')}"
-                g = grouped.setdefault(key, {
-                    "phash": phash,
-                    "user_verdict": obj.get("user_verdict"),
-                    "system_score": obj.get("system_verdict", {}).get("score"),
-                    "system_verdict": obj.get("system_verdict", {}).get("verdict"),
-                    "filenames": set(),
-                    "comments": [],
-                    "reporters": set(),
-                    "first_reported": obj.get("reported_at"),
-                    "status": obj.get("status", "reported"),
-                })
-                if obj.get("filename"):
-                    g["filenames"].add(obj["filename"])
-                if obj.get("comment"):
-                    g["comments"].append(obj["comment"])
-                if obj.get("reporter"):
-                    g["reporters"].add(obj["reporter"])
-                if obj.get("status") == "verified":
-                    g["status"] = "verified"
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"read failed: {exc}")
-
-    items: List[Dict[str, Any]] = []
-    for g in grouped.values():
-        agree = len(g["reporters"])
-        if agree < min_agree:
-            continue
-        items.append({
-            "phash": g["phash"],
-            "user_verdict": g["user_verdict"],
-            "system_verdict": g["system_verdict"],
-            "system_score": g["system_score"],
-            "agree_count": agree,
-            "filenames": sorted(g["filenames"])[:5],
-            "comments": g["comments"][:5],
-            "first_reported": g["first_reported"],
-            "status": g["status"],
-        })
-    items.sort(key=lambda x: -x["agree_count"])
+    items = get_reports(min_agree=min_agree)
     return {"items": items, "total": len(items)}
 
 
@@ -541,20 +318,20 @@ async def admin_review(
 async def admin_check(
     authorization: Optional[str] = Header(default=None),
 ) -> Dict[str, Any]:
-    """Lightweight check used by the frontend to confirm a saved admin
-    token is still valid. Returns {ok: bool}; never throws so the UI can
-    just disable admin features when it's false."""
     expected = os.getenv("TRUTHLENS_ADMIN_TOKEN", "").strip()
     if not expected:
         return {"ok": False, "reason": "admin_disabled"}
-    ok = bool(authorization and authorization.startswith("Bearer ")
-              and authorization[7:].strip() == expected)
+    ok = bool(
+        authorization
+        and authorization.startswith("Bearer ")
+        and authorization[7:].strip() == expected
+    )
     return {"ok": ok}
 
 
 class VerifyRequest(BaseModel):
     phash: str
-    user_verdict: str   # "real" or "ai" — the canonical correct label
+    user_verdict: str
     note: str = ""
 
 
@@ -563,31 +340,12 @@ async def admin_verify(
     body: VerifyRequest,
     authorization: Optional[str] = Header(default=None),
 ) -> Dict[str, Any]:
-    """Mark a (phash, user_verdict) tuple as admin-verified.
-
-    Writes a 'verified' marker entry. The retrain pipeline only consumes
-    entries that have either an explicit verified marker OR ≥3 independent
-    reporters agreeing on the same correction.
-    """
     _check_admin(authorization)
     if body.user_verdict not in ("real", "ai"):
         raise HTTPException(status_code=400, detail="user_verdict must be 'real' or 'ai'")
 
-    settings = get_settings()
-    reports_path = settings.data_dir / "hard_negatives.jsonl"
-    reports_path.parent.mkdir(parents=True, exist_ok=True)
-
-    entry = {
-        "type": "admin_verified",
-        "status": "verified",
-        "phash": body.phash,
-        "user_verdict": body.user_verdict,
-        "note": body.note[:500],
-        "verified_at": datetime.now(timezone.utc).isoformat(),
-    }
     try:
-        with open(reports_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry) + "\n")
+        save_admin_verify(phash=body.phash, user_verdict=body.user_verdict, note=body.note)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"write failed: {exc}")
 
