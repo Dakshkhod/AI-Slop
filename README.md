@@ -179,7 +179,7 @@ These images were never used in training.
 |---------|--------|-------------|-------|
 | v3      | 0.9744 | ~90%        | Eval set same distribution as train — number inflated |
 | v4      | 0.8262 | 47.2%       | Regression — Unsplash real photos too similar to AI outputs |
-| v5      | TBD    | TBD         | Fix in progress — authentic camera photos replacing Unsplash |
+| v5      | 0.8275 | 52.8%       | COCO real photos + EfficientNet-B4 + discriminative LRs |
 
 > We publish version history including regressions.
 > v4 was worse than v3. We documented why and fixed it.
@@ -189,8 +189,9 @@ These images were never used in training.
 2. Classifier head was re-initialised instead of continuing fine-tune from v3
 3. Over-regularisation: `mixup_alpha=0.2` + `label_smooth=0.15` paralysed the model
 
-**v5 fix:** authentic camera sources (MIRFLICKR raw uploads, COCO documentary, Wikimedia, RAISE-1k raw DSLR)
-+ load full v3 checkpoint + milder regularisation (`mixup=0.05`, `label_smooth=0.03`, `lr=2e-5`).
+**v5 fix:** COCO 2017 documentary photos as real class + EfficientNet-B4 backbone (ImageNet pretrained)
++ discriminative LRs (head `1e-4`, backbone `1e-5`) + milder regularisation (`mixup=0.05`, `label_smooth=0.03`).
+Temperature calibrated to T=2.1959 (ECE 0.1580 → 0.0969).
 
 ---
 
